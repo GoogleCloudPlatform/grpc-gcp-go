@@ -35,8 +35,8 @@ func DrawMenu() {
 
 	if err != nil {
 		fmt.Println(err)
-	} else if text == "quit" {
-		return
+	} else if text == "quit\n" {
+		os.Exit(0)
 	} else {
 		fsutils.ChooseAPIMethod(text)
 	}

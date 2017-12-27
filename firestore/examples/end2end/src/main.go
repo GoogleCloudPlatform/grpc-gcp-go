@@ -6,8 +6,9 @@ import (
 
 func main() {
 
-	gfx.DrawMenu()
-
+	for {
+		gfx.DrawMenu()
+	}
 	/* ctx := context.TODO()
 
 	authClient, err := google.DefaultClient(ctx, compute.ComputeScope)
