@@ -12,84 +12,84 @@ func ChooseAPIMethod(api string) {
 
 	switch api {
 
-	case "batchgetdocuments\n":
+	case "batchgetdocuments":
 		fallthrough
-	case "1\n":
+	case "1":
 		apimethods.BatchGetDocuments()
 
-	case "begintransaction\n":
+	case "begintransaction":
 		fallthrough
-	case "2\n":
+	case "2":
 		apimethods.BeginTransaction()
 
-	case "commit\n":
+	case "commit":
 		fallthrough
-	case "3\n":
+	case "3":
 		apimethods.Commit()
 
-	case "createdocument\n":
+	case "createdocument":
 		fallthrough
-	case "4\n":
+	case "4":
 		apimethods.CreateDocument()
 
-	case "deletedocument\n":
+	case "deletedocument":
 		fallthrough
-	case "5\n":
+	case "5":
 		apimethods.DeleteDocument()
 
-	case "getdocument\n":
+	case "getdocument":
 		fallthrough
-	case "6\n":
+	case "6":
 		apimethods.GetDocument()
 
-	case "listcollectionids\n":
+	case "listcollectionids":
 		fallthrough
-	case "7\n":
+	case "7":
 		apimethods.ListCollectionIds()
 
-	case "listdocuments\n":
+	case "listdocuments":
 		fallthrough
-	case "8\n":
+	case "8":
 		apimethods.ListDocuments()
 
-	case "rollback\n":
+	case "rollback":
 		fallthrough
-	case "9\n":
+	case "9":
 		apimethods.Rollback()
 
-	case "runquery\n":
+	case "runquery":
 		fallthrough
-	case "10\n":
+	case "10":
 		apimethods.RunQuery()
 
-	case "updatedocument\n":
+	case "updatedocument":
 		fallthrough
-	case "11\n":
+	case "11":
 		apimethods.UpdateDocument()
 
-	case "write\n":
+	case "write":
 		fallthrough
-	case "12\n":
+	case "12":
 		apimethods.Write()
 
-	case "createindex\n":
+	case "createindex":
 		fallthrough
-	case "13\n":
+	case "13":
 		apimethods.CreateIndex()
 
-	case "deleteindex\n":
+	case "deleteindex":
 		fallthrough
-	case "14\n":
+	case "14":
 		apimethods.DeleteIndex()
 
-	case "getindex\n":
+	case "getindex":
 		fallthrough
-	case "15\n":
+	case "15":
 		apimethods.GetIndex()
 
-	case "listindexes\n":
+	case "listindexes":
 		fallthrough
-	case "16\n":
+	case "16":
 		apimethods.ListIndexes()
 
 	default:

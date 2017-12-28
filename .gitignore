@@ -1,0 +1,7 @@
+*.DS_Store*
+firestore/.DS_Store
+firestore/examples/.DS_Store
+firestore/examples/end2end/.DS_Store
+firestore/examples/end2end/.vscode/launch.json
+*.a
+

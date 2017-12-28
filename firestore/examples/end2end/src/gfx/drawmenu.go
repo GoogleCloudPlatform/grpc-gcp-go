@@ -1,9 +1,9 @@
 package gfx
 
 import (
-	"bufio"
 	"fmt"
 	"os"
+	"userutil"
 )
 
 // DrawMenu ... Draw the system menu
@@ -29,12 +29,9 @@ func DrawMenu() {
 	fmt.Println("16|listindexes .............. ListIndex")
 	fmt.Print("\n\nEnter an option ('quit' to exit):")
 
-	reader := bufio.NewReader(os.Stdin)
-	text, err := reader.ReadString('\n')
+	text := userutil.ReadFromConsole()
 
-	if err != nil {
-		fmt.Println(err)
-	} else if text == "quit\n" {
+	if text == "quit" {
 		os.Exit(0)
 	} else {
 		ChooseAPIMethod(text)
