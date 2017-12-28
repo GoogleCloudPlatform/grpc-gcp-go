@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"fsutils"
 	firestore "go-genproto/googleapis/firestore/v1beta1"
+	"userutil"
 )
 
 //ListDocuments ... List all Documents from a Database
@@ -25,11 +26,7 @@ func ListDocuments() {
 		fmt.Println(err)
 	}
 	for _, doc := range resp.Documents {
-		fmt.Println("\n\nDocument Name:", doc.Name)
-		fmt.Println("  Fields: ")
-		for field, value := range doc.Fields {
-			fmt.Printf("   %v : %v\n", field, value.GetStringValue())
-		}
+		userutil.DrawDocument(*doc)
 	}
 
 	return

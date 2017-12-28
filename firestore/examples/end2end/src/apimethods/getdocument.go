@@ -29,12 +29,7 @@ func GetDocument() {
 		fmt.Println(err)
 	}
 
-	fmt.Println("Name: ", resp.Name)
-	fmt.Println("  Fields:")
-
-	for field, value := range resp.Fields {
-		fmt.Printf("   %v : %v\n", field, value.GetStringValue())
-	}
+	userutil.DrawDocument(*resp)
 
 	return
 }
