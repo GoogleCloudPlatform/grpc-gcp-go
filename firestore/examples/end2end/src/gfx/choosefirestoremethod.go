@@ -1,4 +1,4 @@
-package fsutils
+package gfx
 
 import (
 	"apimethods"

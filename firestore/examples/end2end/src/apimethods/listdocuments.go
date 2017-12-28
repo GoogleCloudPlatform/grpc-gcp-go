@@ -1,9 +1,36 @@
 package apimethods
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"fsutils"
+	firestore "go-genproto/googleapis/firestore/v1beta1"
+)
 
 //ListDocuments ... List all Documents from a Database
 func ListDocuments() {
-	fmt.Println(":: Listing All Documents ::")
+	fmt.Println("\n:: Listing All Documents ::\n")
+
+	client, conn := fsutils.MakeFSClient()
+
+	defer conn.Close()
+
+	listDocsRequest := firestore.ListDocumentsRequest{
+		Parent: "projects/firestoretestclient/databases/(default)",
+	}
+
+	//bgd_client, err := client.BatchGetDocuments(context.Background(), &getDocsRequest, grpc.FailFast(true))
+	resp, err := client.ListDocuments(context.Background(), &listDocsRequest)
+	if err != nil {
+		fmt.Println(err)
+	}
+	for _, doc := range resp.Documents {
+		fmt.Println("\n\nDocument Name:", doc.Name)
+		fmt.Println("  Fields: ")
+		for field, value := range doc.Fields {
+			fmt.Printf("   %v : %v\n", field, value.GetStringValue())
+		}
+	}
+
 	return
 }

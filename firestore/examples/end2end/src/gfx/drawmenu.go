@@ -3,7 +3,6 @@ package gfx
 import (
 	"bufio"
 	"fmt"
-	"fsutils"
 	"os"
 )
 
@@ -38,6 +37,6 @@ func DrawMenu() {
 	} else if text == "quit\n" {
 		os.Exit(0)
 	} else {
-		fsutils.ChooseAPIMethod(text)
+		ChooseAPIMethod(text)
 	}
 }
