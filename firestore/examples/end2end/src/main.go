@@ -5,6 +5,10 @@ import (
 	"gfx"
 )
 
+var (
+	transactionId []byte
+)
+
 func main() {
 
 	for {
