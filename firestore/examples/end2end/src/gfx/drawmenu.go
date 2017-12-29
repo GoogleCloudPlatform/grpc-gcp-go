@@ -9,7 +9,7 @@ import (
 // DrawMenu ... Draw the system menu
 func DrawMenu() {
 
-	fmt.Println("\n     Google Firestore RPC Menu")
+	fmt.Println("\n     Google Firestore RPC Menu\n")
 	fmt.Println("1|batchgetdocuments ......... BatchGetDocuments")
 	fmt.Println("2|begintransaction  ......... BeginTransaction")
 	fmt.Println("3|commit .................... Commit")
@@ -22,7 +22,7 @@ func DrawMenu() {
 	fmt.Println("10|runquery ................. RunQuery")
 	fmt.Println("11|updatedocument ........... UpdateDocument")
 	fmt.Println("12|write .................... Write")
-	fmt.Println("     Firestore Admin RPC's         ")
+	fmt.Println("\n     Firestore Admin RPC's         \n")
 	fmt.Println("13|createindex .............. CreateIndex")
 	fmt.Println("14|deleteindex .............. DeleteIndex")
 	fmt.Println("15|getindex ................. GetIndex")

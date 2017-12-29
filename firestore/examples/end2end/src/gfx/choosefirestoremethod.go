@@ -8,8 +8,6 @@ import (
 //ChooseAPIMethod ... Pick a method call based on menu entry
 func ChooseAPIMethod(api string) {
 
-	fmt.Println("Got ", api)
-
 	switch api {
 
 	case "batchgetdocuments":
