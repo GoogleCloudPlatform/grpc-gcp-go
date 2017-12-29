@@ -1,10 +1,14 @@
 package main
 
-import "gfx"
+import (
+	//"apimethods"
+	"gfx"
+)
 
 func main() {
 
 	for {
 		gfx.DrawMenu()
 	}
+
 }
