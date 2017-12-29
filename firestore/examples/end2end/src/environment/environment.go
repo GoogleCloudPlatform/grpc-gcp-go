@@ -2,7 +2,7 @@ package environment
 
 //Env ... Current environment
 //  Contents:
-//      transactioNId - track transaction ids for commits and rollbacks
+//      transactionId - track transaction ids for commits and rollbacks
 //
 type Env struct {
 	TransactionId []byte
