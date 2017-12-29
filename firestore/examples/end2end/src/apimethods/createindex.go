@@ -40,8 +40,6 @@ func CreateIndex() {
 		Fields:       indexFields,
 	}
 
-	fmt.Println(newIndex)
-
 	createIndexReq := admin.CreateIndexRequest{
 		Parent: "projects/firestoretestclient/databases/(default)",
 		Index:  &newIndex,

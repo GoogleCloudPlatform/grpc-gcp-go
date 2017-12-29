@@ -27,7 +27,7 @@ func DrawMenu() {
 	fmt.Println("14|deleteindex .............. DeleteIndex")
 	fmt.Println("15|getindex ................. GetIndex")
 	fmt.Println("16|listindexes .............. ListIndex")
-	fmt.Print("\n\nEnter an option ('quit' to exit):")
+	fmt.Print("\n\nEnter an option ('quit' to exit): ")
 
 	text := userutil.ReadFromConsole()
 
