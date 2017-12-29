@@ -36,11 +36,11 @@ func UpdateDocument() {
 	}
 
 	for {
-		fmt.Println("Enter Field Name (blank when finished): ")
+		fmt.Print("Enter Field Name (blank when finished): ")
 		fieldName := userutil.ReadFromConsole()
 		if fieldName != "" {
 			fieldPaths = append(fieldPaths, fieldName)
-			fmt.Println("Enter Field Value: ")
+			fmt.Print("Enter Field Value: ")
 			fieldValString := userutil.ReadFromConsole()
 			fields[fieldName] = &firestore.Value{
 				ValueType: &firestore.Value_StringValue{
