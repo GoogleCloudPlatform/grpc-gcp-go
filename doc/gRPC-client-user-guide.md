@@ -1,9 +1,9 @@
-# Instruction for creating a gRPC client for google cloud services
+# Instructions for create a gRPC client for google cloud services
 
 ## Overview
 
-This instruction includes step by step guide for creating a gRPC 
-client to test the new google cloud service from an empty linux 
+This instruction includes a step by step guide for creating a gRPC 
+client to test the google cloud service from an empty linux 
 VM, using GCE ubuntu 16.04 TLS instance.
 
 The main steps are followed as steps below: 
@@ -15,10 +15,6 @@ The main steps are followed as steps below:
 
 ## Environment Prerequisite
 
-**Linux**
-```sh
-$ [sudo] apt-get install build-essential autoconf libtool pkg-config zip unzip zlib1g-dev
-```
 **Golang**
 ```sh
 $ wget https://dl.google.com/go/go1.9.3.linux-amd64.tar.gz
@@ -56,24 +52,11 @@ For most google cloud APIs, all client APIs are already generated in the
 **If they have not already been generated**, 
 the common way to use the plugin looks like
 ```sh
-$ mkdir $HOME/go/src/project-golang
-$ protoc --proto_path=/path/to/proto_dir --go_out=$HOME/go/src/project-golang\  
-/path/to/your/proto_dependency_directory1/*.proto \
-/path/to/your/proto_dependency_directory2/*.proto \
-/path/to/your/proto_directory/*.proto
-```
-
-Since most of cloud services already publish proto files under 
-[googleapis github repo](https://github.com/googleapis/googleapis), I strongly
-recommend use it's Makefile to generate the client API.
-The `Makefile` will help you generate the client API as
-well as all the dependencies. The command will simply be:
-```sh
-$ cd $HOME
-$ mkdir $HOME/go/src/project-golang
-$ git clone https://github.com/googleapis/googleapis.git
-$ cd googleapis
-$ make --f $HOME/googleapis/Makefile OUTPUT=$HOME/go/src/project-golang PROTOC="protoc --proto_path=. --plugin=$HOME/go/bin/protoc-gen-go --go_out=$HOME/go/src/project-golang" FLAGS=""  GRPCPLUGIN=""
+$ mkdir $HOME/go/src/project-golang && cd $HOME/go/src/project-golang
+$ protoc --proto_path=/path/to/proto_dir --go_out=./\  
+path/to/your/proto_dependency_directory1/*.proto \
+path/to/your/proto_dependency_directory2/*.proto \
+path/to/your/proto_service_directory/*.proto
 ```
 
 Assume that you don't need to generate pb files
