@@ -13,26 +13,34 @@ import (
 	"google.golang.org/grpc/credentials/oauth"
 )
 
+const Target = "spanner.googleapis.com:443"
+const Scope = "https://www.googleapis.com/auth/cloud-platform"
+const Database = "projects/grpc-gcp/instances/sample/databases/benchmark"
+
 func TestSessionManagement(t *testing.T) {
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, "https://www.googleapis.com/auth/cloud-platform")
+	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, Scope)
 	if err != nil {
 		log.Fatalf("Failed to create credentials: %v", err)
 	}
-	address := "spanner.googleapis.com:443"
-	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")), grpc.WithPerRPCCredentials(perRPC))
+	conn, err := grpc.Dial(
+		Target,
+		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
+		grpc.WithPerRPCCredentials(perRPC),
+		grpc.WithBalancerName("grpc_gcp"),
+	)
 	defer conn.Close()
 
 	client := spanner.NewSpannerClient(conn)
 
 	createSessionRequest := spanner.CreateSessionRequest{
-		Database: "projects/grpc-gcp/instances/sample/databases/benchmark",
+		Database: Database,
 	}
 
 	session, err := client.CreateSession(context.Background(), &createSessionRequest)
 	
 	if err != nil {
-		fmt.Println(err)
+		t.Errorf("CreateSession failed due to error: %s", err.Error())
 	}
 
 	fmt.Println(session.GetName())
@@ -44,6 +52,6 @@ func TestSessionManagement(t *testing.T) {
 	_, err = client.DeleteSession(context.Background(), &deleteSessionRequest)
 
 	if err != nil {
-		fmt.Println(err)
+		t.Errorf("DeleteSession failed due to error: %s", err.Error())
 	}
 }
