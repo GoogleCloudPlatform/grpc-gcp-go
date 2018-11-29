@@ -19,12 +19,14 @@
 package grpcgcp
 
 import (
+	"fmt"
 	"context"
 	"sync"
 	"sort"
 
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
 )
@@ -37,16 +39,58 @@ const maxConcurrentStreamsLowWatermark = 100
 
 // newBuilder creates a new grpc_gpc balancer builder.
 func newBuilder() balancer.Builder {
-	return base.NewBalancerBuilderWithConfig(Name, &gcpPickerBuilder{}, base.Config{HealthCheck: true})
+	gpb := gcpPickerBuilder{}
+	bb := base.NewBalancerBuilderWithConfig(Name, &gpb, base.Config{})
+	return &gcpBalancerBuilder{
+		baseBuilder: bb,
+		pickerBuilder: gpb,
+	}
 }
 
 func init() {
 	balancer.Register(newBuilder())
 }
 
-type gcpPickerBuilder struct{}
+type gcpBalancerBuilder struct{
+	baseBuilder   balancer.Builder
+	pickerBuilder gcpPickerBuilder
+}
 
-func (*gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubConn) balancer.Picker {
+func (gbb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOptions) balancer.Balancer {
+	gbb.pickerBuilder.cc = cc
+	bbc := gbb.baseBuilder.Build(cc, opt)
+	return &gcpBalancer{
+		baseBalancer: bbc,
+		cc:           cc,
+	}
+}
+
+func (*gcpBalancerBuilder) Name() string {
+	return Name
+}
+
+type gcpBalancer struct {
+	baseBalancer balancer.Balancer
+	cc           balancer.ClientConn
+}
+
+func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
+	gb.baseBalancer.HandleResolvedAddrs(addrs, err)
+}
+
+func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
+	gb.baseBalancer.HandleSubConnStateChange(sc, s)
+}
+
+func (gb *gcpBalancer) Close() {
+	gb.baseBalancer.Close()
+}
+
+type gcpPickerBuilder struct{
+	cc balancer.ClientConn
+}
+
+func (gpb *gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubConn) balancer.Picker {
 	grpclog.Infof("grpcgcpPicker: newPicker called with readySCs: %v", readySCs)
 	var refs []*subConnRef
 	for _, sc := range readySCs {
@@ -59,6 +103,7 @@ func (*gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubConn) b
 	return &gcpPicker{
 		addrs:  addrs,
 		scRefs: refs,
+		cc: gpb.cc,
 	}
 }
 
@@ -71,6 +116,7 @@ type subConnRef struct {
 type gcpPicker struct {
 	scRefs []*subConnRef
 	addrs  []resolver.Address
+	cc     balancer.ClientConn
 	mu     sync.Mutex
 }
 
@@ -80,11 +126,21 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	}
 
 	p.mu.Lock()
-	sc := p.getSubConnRef().subConn
+	scRef := p.getSubConnRef()
+	if scRef == nil {
+		return nil, nil, balancer.ErrNoSubConnAvailable
+	}
+	scRef.streamsCnt++
+	sc := scRef.subConn
 	// sc := p.subConns[p.next]
 	// p.next = (p.next + 1) % len(p.subConns)
 	p.mu.Unlock()
-	return sc, nil, nil
+	callback := func (info balancer.DoneInfo) {
+		// TODO: check for error
+		fmt.Println("calling callback")
+		scRef.streamsCnt--
+	}
+	return sc, callback, nil
 }
 
 func (p *gcpPicker) getSubConnRef() *subConnRef{
@@ -92,13 +148,24 @@ func (p *gcpPicker) getSubConnRef() *subConnRef{
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
 
-	size := len(p.scRefs)
-	if size > 0 && p.scRefs[0].streamsCnt < maxConcurrentStreamsLowWatermark {
+	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < maxConcurrentStreamsLowWatermark {
 		return p.scRefs[0]
 	}
 
-	if (size < maxSize) {
-		//TODO
+	if len(p.scRefs) < maxSize {
+		// create a new subconn if all current subconns are busy
+		sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
+		if err == nil {
+			sc.Connect()
+			newRef := &subConnRef{subConn: sc}
+			p.scRefs = append(p.scRefs, newRef)
+			return newRef
+		}
 	}
+
+	if len(p.scRefs) == 0 {
+		return nil
+	}
+
 	return p.scRefs[0]
 }
