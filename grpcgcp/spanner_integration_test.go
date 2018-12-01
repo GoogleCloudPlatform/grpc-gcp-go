@@ -28,6 +28,7 @@ func TestSessionManagement(t *testing.T) {
 		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
 		grpc.WithPerRPCCredentials(perRPC),
 		grpc.WithBalancerName("grpc_gcp"),
+		grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor),
 	)
 	defer conn.Close()
 

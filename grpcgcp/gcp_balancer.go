@@ -29,6 +29,8 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/metadata"
+	// "runtime/debug"
 )
 
 // Name is the name of grpc_gcp balancer.
@@ -37,7 +39,7 @@ const Name = "grpc_gcp"
 const maxSize = 10
 const maxConcurrentStreamsLowWatermark = 100
 
-// newBuilder creates a new grpc_gpc balancer builder.
+// newBuilder creates a new grpc_gcp balancer builder.
 func newBuilder() balancer.Builder {
 	gpb := gcpPickerBuilder{}
 	bb := base.NewBalancerBuilderWithConfig(Name, &gpb, base.Config{})
@@ -121,6 +123,11 @@ type gcpPicker struct {
 }
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
+	// debug.PrintStack()
+	fmt.Println("*** calling gcpPicker.Pick")
+	// fmt.Printf("Pick ctx: %+v\n", ctx)
+	md, _ := metadata.FromOutgoingContext(ctx)
+	fmt.Printf("gcpPicker.Pick md: %+v\n", md)
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
@@ -137,7 +144,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	p.mu.Unlock()
 	callback := func (info balancer.DoneInfo) {
 		// TODO: check for error
-		fmt.Println("calling callback")
+		fmt.Println("*** calling callback")
 		scRef.streamsCnt--
 	}
 	return sc, callback, nil
