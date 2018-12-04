@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
-	"google.golang.org/grpc/metadata"
+	// "google.golang.org/grpc/metadata"
 	// "runtime/debug"
 )
 
@@ -124,10 +124,10 @@ type gcpPicker struct {
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
 	// debug.PrintStack()
-	fmt.Println("*** calling gcpPicker.Pick")
-	// fmt.Printf("Pick ctx: %+v\n", ctx)
-	md, _ := metadata.FromOutgoingContext(ctx)
-	fmt.Printf("gcpPicker.Pick md: %+v\n", md)
+	gcpCtx := ctx.Value(gcpKey).(*gcpContext)
+	af := gcpCtx.affinityKey
+	fmt.Printf("*** gcpPicker.Pick: gcpCtx.affinityKey: %+v\n", af)
+	// TODO: use affinityKey to select subcon
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
