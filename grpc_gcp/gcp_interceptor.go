@@ -1,4 +1,4 @@
-package grpcgcp
+package grpc_gcp
 
 import (
 	"fmt"
@@ -18,8 +18,13 @@ type gcpContext struct {
 	affinityKey string
 }
 
+// GCPInterceptor represents the interceptor for GCP specific features
+type GCPInterceptor struct {
+	apiConfig ApiConfig
+}
+
 // GCPUnaryClientInterceptor intercepts the execution of a unary RPC on the client using grpcgcp extension.
-func GCPUnaryClientInterceptor(
+func (*GCPInterceptor) GCPUnaryClientInterceptor(
 	ctx context.Context,
 	method string,
 	req interface{},
@@ -58,6 +63,7 @@ func GCPUnaryClientInterceptor(
 	// 	return fmt.Errorf("Affinity key %s for method %s is a valid path", affinityKey, method)
 	// }
 	ctx = context.WithValue(ctx, gcpKey, &gcpContext{affinityKey: ak})
+
 	err := invoker(ctx, method, req, reply, cc, opts...)
 	return err
 }

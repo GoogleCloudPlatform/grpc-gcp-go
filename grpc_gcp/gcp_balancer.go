@@ -16,7 +16,7 @@
  *
  */
 
-package grpcgcp
+package grpc_gcp
 
 import (
 	"fmt"

@@ -1,4 +1,4 @@
-package grpcgcp
+package grpc_gcp
 
 import (
 	"fmt"
@@ -23,12 +23,43 @@ func TestSessionManagement(t *testing.T) {
 	if err != nil {
 		log.Fatalf("Failed to create credentials: %v", err)
 	}
+	gcpInt := &GCPInterceptor{
+		apiConfig: ApiConfig{
+			ChannelPool: &ChannelPoolConfig{
+				MaxSize: 10,
+				MaxConcurrentStreamsLowWatermark: 1,
+			},
+			Method: []*MethodConfig{
+				&MethodConfig{
+					Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
+					Affinity: &AffinityConfig{
+						Command: AffinityConfig_BIND,
+						AffinityKey: "name",
+					},
+				},
+				&MethodConfig{
+					Name: []string{"/google.spanner.v1.Spanner/GetSession"},
+					Affinity: &AffinityConfig{
+						Command: AffinityConfig_BOUND,
+						AffinityKey: "name",
+					},
+				},
+				&MethodConfig{
+					Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
+					Affinity: &AffinityConfig{
+						Command: AffinityConfig_UNBIND,
+						AffinityKey: "name",
+					},
+				},
+			},
+		},
+	}
 	conn, err := grpc.Dial(
 		Target,
 		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
 		grpc.WithPerRPCCredentials(perRPC),
 		grpc.WithBalancerName("grpc_gcp"),
-		grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor),
+		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 	)
 	defer conn.Close()
 
