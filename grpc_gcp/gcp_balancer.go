@@ -116,24 +116,26 @@ type subConnRef struct {
 }
 
 type gcpPicker struct {
-	scRefs []*subConnRef
-	addrs  []resolver.Address
-	cc     balancer.ClientConn
-	mu     sync.Mutex
+	scRefs      []*subConnRef
+	addrs       []resolver.Address
+	cc          balancer.ClientConn
+	mu          sync.Mutex
+	affinityMap map[string]*subConnRef
 }
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
-	// debug.PrintStack()
-	gcpCtx := ctx.Value(gcpKey).(*gcpContext)
-	af := gcpCtx.affinityKey
-	fmt.Printf("*** gcpPicker.Pick: gcpCtx.affinityKey: %+v\n", af)
-	// TODO: use affinityKey to select subcon
+	// TODO: use affinityKey to select subcosn
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
+	gcpCtx, ok := ctx.Value(gcpKey).(*gcpContext)
+	var ak = ""
+	if ok {
+		ak = gcpCtx.affinityKey
+	}
 
 	p.mu.Lock()
-	scRef := p.getSubConnRef()
+	scRef := p.getSubConnRef(ak)
 	if scRef == nil {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
@@ -150,7 +152,13 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	return sc, callback, nil
 }
 
-func (p *gcpPicker) getSubConnRef() *subConnRef{
+func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
+	if boundKey != "" {
+		ref, ok := p.affinityMap[boundKey]
+		if ok {
+			return ref
+		}
+	}
 	sort.Slice(p.scRefs[:], func(i, j int) bool {
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
