@@ -23,6 +23,8 @@ import (
 	"context"
 	"sync"
 	"sort"
+	"strings"
+	"reflect"
 
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
@@ -106,6 +108,7 @@ func (gpb *gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubCon
 		addrs:  addrs,
 		scRefs: refs,
 		cc: gpb.cc,
+		affinityMap: make(map[string]*subConnRef),
 	}
 }
 
@@ -125,29 +128,70 @@ type gcpPicker struct {
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
 	// TODO: use affinityKey to select subcosn
+	fmt.Println("*** gcpPicker starts picking subconn")
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
-	gcpCtx, ok := ctx.Value(gcpKey).(*gcpContext)
-	var ak = ""
-	if ok {
-		ak = gcpCtx.affinityKey
+
+	gcpCtx, hasGcpCxt := ctx.Value(gcpKey).(*gcpContext)
+	boundKey := ""
+
+	fmt.Printf("*** before pre process: p.affinityMap: %+v\n", p.affinityMap)
+
+	if hasGcpCxt {
+		// pre process
+		fmt.Println("*** starting pre process")
+		cfg := gcpCtx.affinityCfg
+		locator := cfg.GetAffinityKey()
+		cmd := cfg.GetCommand()
+		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
+			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to retrieve affinity key from request message: %v", err)
+			}
+			boundKey = a
+		}
 	}
 
 	p.mu.Lock()
-	scRef := p.getSubConnRef(ak)
+	scRef := p.getSubConnRef(boundKey)
 	if scRef == nil {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
 	scRef.streamsCnt++
 	sc := scRef.subConn
-	// sc := p.subConns[p.next]
-	// p.next = (p.next + 1) % len(p.subConns)
 	p.mu.Unlock()
+
+	// post process
 	callback := func (info balancer.DoneInfo) {
-		// TODO: check for error
-		fmt.Println("*** calling callback")
+		fmt.Println("*** starting post process")
+		if info.Err == nil {
+			if hasGcpCxt {
+				cfg := gcpCtx.affinityCfg
+				locator := cfg.GetAffinityKey()
+				cmd := cfg.GetCommand()
+				if cmd == AffinityConfig_BIND {
+					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
+					if err == nil {
+						_, ok := p.affinityMap[bindKey]
+						if !ok {
+							p.affinityMap[bindKey] = scRef
+						}
+						p.affinityMap[bindKey].affinityCnt++
+					}
+				} else if cmd == AffinityConfig_UNBIND {
+					boundRef, ok := p.affinityMap[boundKey]
+					if ok {
+						boundRef.affinityCnt--
+						if boundRef.affinityCnt <= 0 {
+							delete(p.affinityMap, boundKey)
+						}
+					}
+				}
+			}
+		}
 		scRef.streamsCnt--
+		fmt.Printf("*** after post process: p.affinityMap: %+v\n", p.affinityMap)
 	}
 	return sc, callback, nil
 }
@@ -183,4 +227,37 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	}
 
 	return p.scRefs[0]
+}
+
+func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey string, err error) {
+	if locator == "" {
+		return "", fmt.Errorf("affinityKey locator is not valid")
+	}
+
+	names := strings.Split(locator, ".")
+	val := reflect.ValueOf(msg).Elem()
+
+	var ak string
+	i := 0
+	for ; i < len(names); i++ {
+		name := names[i]
+		titledName := strings.Title(name)
+		valField := val.FieldByName(titledName)
+		if valField.IsValid() {
+			switch valField.Kind() {
+			case reflect.String:
+				ak = valField.String()
+				break
+			case reflect.Interface:
+				val = reflect.ValueOf(valField.Interface())
+			default:
+				return "", fmt.Errorf("field %s in message is neither a string nor another message", titledName)
+			}
+		}
+	}
+	if i == len(names) {
+		return ak, nil
+	}
+	
+	return "", fmt.Errorf("cannot get valid affinity key")
 }

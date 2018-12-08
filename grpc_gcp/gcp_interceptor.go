@@ -1,13 +1,8 @@
 package grpc_gcp
 
 import (
-	"fmt"
 	"google.golang.org/grpc"
-	// "google.golang.org/grpc/metadata"
 	"context"
-	// "github.com/golang/protobuf/proto"
-	"reflect"
-	"strings"
 )
 
 type key int
@@ -15,8 +10,9 @@ type key int
 var gcpKey key
 
 type gcpContext struct {
-	affinityKey string
-	affinityCmd AffinityConfig_Command
+	affinityCfg AffinityConfig
+	reqMsg interface{}
+	replyMsg interface{}
 }
 
 // GCPInterceptor represents the interceptor for GCP specific features
@@ -56,55 +52,13 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 ) error {
 	affinityCfg, ok := gcpInt.methodToAffinity[method]
 	if ok {
-		locator := affinityCfg.GetAffinityKey()
-		ak := ""
-		cmd := affinityCfg.GetCommand()
-		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
-			a, err := getAffinityKeyFromMessage(locator, req)
-			if err != nil {
-				return fmt.Errorf("failed to retrieve affinity key from message: %v", err)
-			}
-			ak = a
-		}
 		gcpCxt := & gcpContext{
-			affinityKey: ak,
-			affinityCmd: cmd,
+			affinityCfg: affinityCfg,
+			reqMsg: req,
+			replyMsg: reply,
 		}
 		ctx = context.WithValue(ctx, gcpKey, gcpCxt)
 	}
 
 	return invoker(ctx, method, req, reply, cc, opts...)
-}
-
-func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey string, err error) {
-	if locator == "" {
-		return "", fmt.Errorf("affinityKey locator is not valid")
-	}
-
-	names := strings.Split(locator, ".")
-	val := reflect.ValueOf(msg).Elem()
-
-	var ak string
-	i := 0
-	for ; i < len(names); i++ {
-		name := names[i]
-		titledName := strings.Title(name)
-		valField := val.FieldByName(titledName)
-		if valField.IsValid() {
-			switch valField.Kind() {
-			case reflect.String:
-				ak = valField.String()
-				break
-			case reflect.Interface:
-				val = reflect.ValueOf(valField.Interface())
-			default:
-				return "", fmt.Errorf("field %s in message is neither a string nor another message", titledName)
-			}
-		}
-	}
-	if i == len(names) {
-		return ak, nil
-	}
-	
-	return "", fmt.Errorf("cannot get valid affinity key")
 }
