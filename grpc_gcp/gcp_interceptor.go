@@ -13,11 +13,12 @@ type gcpContext struct {
 	affinityCfg AffinityConfig
 	reqMsg interface{}
 	replyMsg interface{}
+	cpCfg *ChannelPoolConfig
 }
 
 // GCPInterceptor represents the interceptor for GCP specific features
 type GCPInterceptor struct {
-	apiConfig ApiConfig
+	cpCfg *ChannelPoolConfig
 	methodToAffinity map[string]AffinityConfig
 }
 
@@ -35,7 +36,7 @@ func NewGCPInterceptor(config ApiConfig) *GCPInterceptor {
 		}
 	}
 	return &GCPInterceptor{
-		apiConfig: config,
+		cpCfg: config.GetChannelPool(),
 		methodToAffinity: mp,
 	}
 }
@@ -52,12 +53,13 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 ) error {
 	affinityCfg, ok := gcpInt.methodToAffinity[method]
 	if ok {
-		gcpCxt := & gcpContext{
+		gcpCtx := & gcpContext{
 			affinityCfg: affinityCfg,
 			reqMsg: req,
 			replyMsg: reply,
+			cpCfg: gcpInt.cpCfg,
 		}
-		ctx = context.WithValue(ctx, gcpKey, gcpCxt)
+		ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 	}
 
 	return invoker(ctx, method, req, reply, cc, opts...)

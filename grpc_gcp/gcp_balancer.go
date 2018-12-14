@@ -38,8 +38,9 @@ import (
 // Name is the name of grpc_gcp balancer.
 const Name = "grpc_gcp"
 
-const maxSize = 10
-const maxConcurrentStreamsLowWatermark = 100
+// Default settings for max pool size and max concurrent  streams.
+const defaultMaxConn = 10
+const defaultMaxStream = 100
 
 // newBuilder creates a new grpc_gcp balancer builder.
 func newBuilder() balancer.Builder {
@@ -114,8 +115,8 @@ func (gpb *gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubCon
 
 type subConnRef struct {
 	subConn     balancer.SubConn
-	affinityCnt int
-	streamsCnt  int
+	affinityCnt uint32
+	streamsCnt  uint32
 }
 
 type gcpPicker struct {
@@ -124,6 +125,8 @@ type gcpPicker struct {
 	cc          balancer.ClientConn
 	mu          sync.Mutex
 	affinityMap map[string]*subConnRef
+	maxConn     uint32
+	maxStream   uint32
 }
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
@@ -133,17 +136,35 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
 
-	gcpCtx, hasGcpCxt := ctx.Value(gcpKey).(*gcpContext)
+	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 
 	fmt.Printf("*** before pre process: p.affinityMap: %+v\n", p.affinityMap)
 
-	if hasGcpCxt {
+	if hasGcpCtx {
 		// pre process
 		fmt.Println("*** starting pre process")
-		cfg := gcpCtx.affinityCfg
-		locator := cfg.GetAffinityKey()
-		cmd := cfg.GetCommand()
+		afCfg := gcpCtx.affinityCfg
+		cpCfg := gcpCtx.cpCfg
+		if cpCfg != nil {
+			// Initialize p.maxConn and p.maxStream for the first time.
+			if p.maxConn == 0 {
+				if cpCfg.GetMaxSize() == 0{
+					p.maxConn = defaultMaxConn
+				} else {
+					p.maxConn = cpCfg.GetMaxSize()
+				}
+			}
+			if p.maxStream == 0 {
+				if cpCfg.GetMaxConcurrentStreamsLowWatermark() == 0 {
+					p.maxStream = defaultMaxStream
+				} else {
+					p.maxStream = cpCfg.GetMaxConcurrentStreamsLowWatermark()
+				}
+			}
+		}
+		locator := afCfg.GetAffinityKey()
+		cmd := afCfg.GetCommand()
 		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
 			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
@@ -166,10 +187,10 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	callback := func (info balancer.DoneInfo) {
 		fmt.Println("*** starting post process")
 		if info.Err == nil {
-			if hasGcpCxt {
-				cfg := gcpCtx.affinityCfg
-				locator := cfg.GetAffinityKey()
-				cmd := cfg.GetCommand()
+			if hasGcpCtx {
+				afCfg := gcpCtx.affinityCfg
+				locator := afCfg.GetAffinityKey()
+				cmd := afCfg.GetCommand()
 				if cmd == AffinityConfig_BIND {
 					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
 					if err == nil {
@@ -207,11 +228,11 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
 
-	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < maxConcurrentStreamsLowWatermark {
+	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < p.maxStream {
 		return p.scRefs[0]
 	}
 
-	if len(p.scRefs) < maxSize {
+	if len(p.scRefs) < int(p.maxConn) {
 		// create a new subconn if all current subconns are busy
 		sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
 		if err == nil {
@@ -258,6 +279,6 @@ func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey str
 	if i == len(names) {
 		return ak, nil
 	}
-	
+
 	return "", fmt.Errorf("cannot get valid affinity key")
 }
