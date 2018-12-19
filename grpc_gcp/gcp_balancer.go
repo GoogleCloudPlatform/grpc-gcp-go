@@ -144,27 +144,27 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	if hasGcpCtx {
 		// pre process
 		fmt.Println("*** starting pre process")
-		afCfg := gcpCtx.affinityCfg
-		cpCfg := gcpCtx.cpCfg
-		if cpCfg != nil {
+		affinity := gcpCtx.affinityCfg
+		channelPool := gcpCtx.channelPoolCfg
+		if channelPool != nil {
 			// Initialize p.maxConn and p.maxStream for the first time.
 			if p.maxConn == 0 {
-				if cpCfg.GetMaxSize() == 0{
+				if channelPool.GetMaxSize() == 0{
 					p.maxConn = defaultMaxConn
 				} else {
-					p.maxConn = cpCfg.GetMaxSize()
+					p.maxConn = channelPool.GetMaxSize()
 				}
 			}
 			if p.maxStream == 0 {
-				if cpCfg.GetMaxConcurrentStreamsLowWatermark() == 0 {
+				if channelPool.GetMaxConcurrentStreamsLowWatermark() == 0 {
 					p.maxStream = defaultMaxStream
 				} else {
-					p.maxStream = cpCfg.GetMaxConcurrentStreamsLowWatermark()
+					p.maxStream = channelPool.GetMaxConcurrentStreamsLowWatermark()
 				}
 			}
 		}
-		locator := afCfg.GetAffinityKey()
-		cmd := afCfg.GetCommand()
+		locator := affinity.GetAffinityKey()
+		cmd := affinity.GetCommand()
 		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
 			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
@@ -188,9 +188,9 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		fmt.Println("*** starting post process")
 		if info.Err == nil {
 			if hasGcpCtx {
-				afCfg := gcpCtx.affinityCfg
-				locator := afCfg.GetAffinityKey()
-				cmd := afCfg.GetCommand()
+				affinity := gcpCtx.affinityCfg
+				locator := affinity.GetAffinityKey()
+				cmd := affinity.GetCommand()
 				if cmd == AffinityConfig_BIND {
 					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
 					if err == nil {
@@ -234,6 +234,7 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 
 	if len(p.scRefs) < int(p.maxConn) {
 		// create a new subconn if all current subconns are busy
+		fmt.Println("*** creating new subconn")
 		sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
 		if err == nil {
 			sc.Connect()

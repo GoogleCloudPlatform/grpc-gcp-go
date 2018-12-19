@@ -1,7 +1,7 @@
 package grpc_gcp
 
 import (
-	"fmt"
+	// "fmt"
 	"context"
 	"log"
 	"os"
@@ -17,7 +17,7 @@ const Target = "spanner.googleapis.com:443"
 const Scope = "https://www.googleapis.com/auth/cloud-platform"
 const Database = "projects/grpc-gcp/instances/sample/databases/benchmark"
 
-func TestSessionManagement(t *testing.T) {
+func initClientConn(t *testing.T) *grpc.ClientConn {
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, Scope)
 	if err != nil {
@@ -60,6 +60,14 @@ func TestSessionManagement(t *testing.T) {
 		grpc.WithBalancerName("grpc_gcp"),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 	)
+	if err != nil {
+		t.Errorf("Creation of ClientConn failed due to error: %s", err.Error())
+	}
+	return conn
+}
+
+func TestSessionManagement(t *testing.T) {
+	conn := initClientConn(t)
 	defer conn.Close()
 
 	client := spanner.NewSpannerClient(conn)
@@ -67,21 +75,28 @@ func TestSessionManagement(t *testing.T) {
 	createSessionRequest := spanner.CreateSessionRequest{
 		Database: Database,
 	}
-
 	session, err := client.CreateSession(context.Background(), &createSessionRequest)
-	
 	if err != nil {
 		t.Errorf("CreateSession failed due to error: %s", err.Error())
 	}
 
-	fmt.Println(session.GetName())
+	sessionName := session.GetName()
 
-	deleteSessionRequest := spanner.DeleteSessionRequest{
-		Name: session.GetName(),
+	getSessionRequest := spanner.GetSessionRequest{
+		Name: sessionName,
+	}
+	getRes, err := client.GetSession(context.Background(), &getSessionRequest)
+	if err != nil {
+		t.Errorf("GetSession failed due to error: %s", err.Error())
+	}
+	if getRes.GetName() != sessionName {
+		t.Errorf("GetSession returns different session name: %s, should be: %s", getRes.GetName(), sessionName)
 	}
 
+	deleteSessionRequest := spanner.DeleteSessionRequest{
+		Name: sessionName,
+	}
 	_, err = client.DeleteSession(context.Background(), &deleteSessionRequest)
-
 	if err != nil {
 		t.Errorf("DeleteSession failed due to error: %s", err.Error())
 	}
