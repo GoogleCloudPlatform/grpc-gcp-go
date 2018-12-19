@@ -19,13 +19,6 @@
 package grpc_gcp
 
 import (
-	"fmt"
-	"context"
-	"sync"
-	"sort"
-	"strings"
-	"reflect"
-
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"
@@ -42,31 +35,25 @@ const Name = "grpc_gcp"
 const defaultMaxConn = 10
 const defaultMaxStream = 100
 
-// newBuilder creates a new grpc_gcp balancer builder.
-func newBuilder() balancer.Builder {
-	gpb := gcpPickerBuilder{}
-	bb := base.NewBalancerBuilderWithConfig(Name, &gpb, base.Config{})
-	return &gcpBalancerBuilder{
-		baseBuilder: bb,
-		pickerBuilder: gpb,
-	}
-}
-
-func init() {
-	balancer.Register(newBuilder())
-}
-
 type gcpBalancerBuilder struct{
-	baseBuilder   balancer.Builder
-	pickerBuilder gcpPickerBuilder
+	name          string
+	pickerBuilder base.PickerBuilder
+	config        base.Config
 }
 
-func (gbb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOptions) balancer.Balancer {
-	gbb.pickerBuilder.cc = cc
-	bbc := gbb.baseBuilder.Build(cc, opt)
+func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOptions) balancer.Balancer {
 	return &gcpBalancer{
-		baseBalancer: bbc,
-		cc:           cc,
+		cc:            cc,
+		pickerBuilder: bb.pickerBuilder,
+
+		subConns: make(map[resolver.Address]balancer.SubConn),
+		scStates: make(map[balancer.SubConn]connectivity.State),
+		csEvltr:  &connectivityStateEvaluator{},
+		// Initialize picker to a picker that always return
+		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
+		// may call UpdateBalancerState with this picker.
+		picker: base.NewErrPicker(balancer.ErrNoSubConnAvailable),
+		config: bb.config,
 	}
 }
 
@@ -74,212 +61,158 @@ func (*gcpBalancerBuilder) Name() string {
 	return Name
 }
 
+// newBuilder creates a new grpc_gcp balancer builder.
+func newBuilder() balancer.Builder {
+	return &gcpBalancerBuilder{
+		name: Name,
+		pickerBuilder: &gcpPickerBuilder{},
+		config: base.Config{HealthCheck: true},
+	}
+}
+
+// connectivityStateEvaluator gets updated by addrConns when their
+// states transition, based on which it evaluates the state of
+// ClientConn.
+type connectivityStateEvaluator struct {
+	numReady            uint64 // Number of addrConns in ready state.
+	numConnecting       uint64 // Number of addrConns in connecting state.
+	numTransientFailure uint64 // Number of addrConns in transientFailure.
+}
+
+// recordTransition records state change happening in every subConn and based on
+// that it evaluates what aggregated state should be.
+// It can only transition between Ready, Connecting and TransientFailure. Other states,
+// Idle and Shutdown are transitioned into by ClientConn; in the beginning of the connection
+// before any subConn is created ClientConn is in idle state. In the end when ClientConn
+// closes it is in Shutdown state.
+//
+// recordTransition should only be called synchronously from the same goroutine.
+func (cse *connectivityStateEvaluator) recordTransition(oldState, newState connectivity.State) connectivity.State {
+	// Update counters.
+	for idx, state := range []connectivity.State{oldState, newState} {
+		updateVal := 2*uint64(idx) - 1 // -1 for oldState and +1 for new.
+		switch state {
+		case connectivity.Ready:
+			cse.numReady += updateVal
+		case connectivity.Connecting:
+			cse.numConnecting += updateVal
+		case connectivity.TransientFailure:
+			cse.numTransientFailure += updateVal
+		}
+	}
+
+	// Evaluate.
+	if cse.numReady > 0 {
+		return connectivity.Ready
+	}
+	if cse.numConnecting > 0 {
+		return connectivity.Connecting
+	}
+	return connectivity.TransientFailure
+}
+
 type gcpBalancer struct {
-	baseBalancer balancer.Balancer
-	cc           balancer.ClientConn
+	cc            balancer.ClientConn
+	pickerBuilder base.PickerBuilder
+
+	csEvltr *connectivityStateEvaluator
+	state   connectivity.State
+
+	subConns map[resolver.Address]balancer.SubConn
+	scStates map[balancer.SubConn]connectivity.State
+	picker   balancer.Picker
+	config   base.Config
 }
 
 func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
-	gb.baseBalancer.HandleResolvedAddrs(addrs, err)
+	if err != nil {
+		grpclog.Infof("base.baseBalancer: HandleResolvedAddrs called with error %v", err)
+		return
+	}
+	grpclog.Infoln("base.baseBalancer: got new resolved addresses: ", addrs)
+	// addrsSet is the set converted from addrs, it's used for quick lookup of an address.
+	addrsSet := make(map[resolver.Address]struct{})
+	for _, a := range addrs {
+		addrsSet[a] = struct{}{}
+		if _, ok := gb.subConns[a]; !ok {
+			// a is a new address (not existing in b.subConns).
+			sc, err := gb.cc.NewSubConn([]resolver.Address{a}, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
+			if err != nil {
+				grpclog.Warningf("base.baseBalancer: failed to create new SubConn: %v", err)
+				continue
+			}
+			gb.subConns[a] = sc
+			gb.scStates[sc] = connectivity.Idle
+			sc.Connect()
+		}
+	}
+	for a, sc := range gb.subConns {
+		// a was removed by resolver.
+		if _, ok := addrsSet[a]; !ok {
+			gb.cc.RemoveSubConn(sc)
+			delete(gb.subConns, a)
+			// Keep the state of this sc in b.scStates until sc's state becomes Shutdown.
+			// The entry will be deleted in HandleSubConnStateChange.
+		}
+	}
+}
+
+// regeneratePicker takes a snapshot of the balancer, and generates a picker
+// from it. The picker is
+//  - errPicker with ErrTransientFailure if the balancer is in TransientFailure,
+//  - built by the pickerBuilder with all READY SubConns otherwise.
+func (gb *gcpBalancer) regeneratePicker() {
+	if gb.state == connectivity.TransientFailure {
+		gb.picker = base.NewErrPicker(balancer.ErrTransientFailure)
+		return
+	}
+	readySCs := make(map[resolver.Address]balancer.SubConn)
+
+	// Filter out all ready SCs from full subConn map.
+	for addr, sc := range gb.subConns {
+		if st, ok := gb.scStates[sc]; ok && st == connectivity.Ready {
+			readySCs[addr] = sc
+		}
+	}
+	gb.picker = gb.pickerBuilder.Build(readySCs)
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
-	gb.baseBalancer.HandleSubConnStateChange(sc, s)
+	grpclog.Infof("base.baseBalancer: handle SubConn state change: %p, %v", sc, s)
+	oldS, ok := gb.scStates[sc]
+	if !ok {
+		grpclog.Infof("base.baseBalancer: got state changes for an unknown SubConn: %p, %v", sc, s)
+		return
+	}
+	gb.scStates[sc] = s
+	switch s {
+	case connectivity.Idle:
+		sc.Connect()
+	case connectivity.Shutdown:
+		// When an address was removed by resolver, b called RemoveSubConn but
+		// kept the sc's state in scStates. Remove state for this sc here.
+		delete(gb.scStates, sc)
+	}
+
+	oldAggrState := gb.state
+	gb.state = gb.csEvltr.recordTransition(oldS, s)
+
+	// Regenerate picker when one of the following happens:
+	//  - this sc became ready from not-ready
+	//  - this sc became not-ready from ready
+	//  - the aggregated state of balancer became TransientFailure from non-TransientFailure
+	//  - the aggregated state of balancer became non-TransientFailure from TransientFailure
+	if (s == connectivity.Ready) != (oldS == connectivity.Ready) ||
+		(gb.state == connectivity.TransientFailure) != (oldAggrState == connectivity.TransientFailure) {
+		gb.regeneratePicker()
+	}
+
+	gb.cc.UpdateBalancerState(gb.state, gb.picker)
 }
 
 func (gb *gcpBalancer) Close() {
-	gb.baseBalancer.Close()
 }
 
-type gcpPickerBuilder struct{
-	cc balancer.ClientConn
-}
-
-func (gpb *gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubConn) balancer.Picker {
-	grpclog.Infof("grpcgcpPicker: newPicker called with readySCs: %v", readySCs)
-	var refs []*subConnRef
-	for _, sc := range readySCs {
-		refs = append(refs, &subConnRef{subConn: sc})
-	}
-	addrs := make([]resolver.Address, 0, len(readySCs))
-	for addr := range readySCs {
-		addrs = append(addrs, addr)
-	}
-	return &gcpPicker{
-		addrs:  addrs,
-		scRefs: refs,
-		cc: gpb.cc,
-		affinityMap: make(map[string]*subConnRef),
-	}
-}
-
-type subConnRef struct {
-	subConn     balancer.SubConn
-	affinityCnt uint32
-	streamsCnt  uint32
-}
-
-type gcpPicker struct {
-	scRefs      []*subConnRef
-	addrs       []resolver.Address
-	cc          balancer.ClientConn
-	mu          sync.Mutex
-	affinityMap map[string]*subConnRef
-	maxConn     uint32
-	maxStream   uint32
-}
-
-func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
-	// TODO: use affinityKey to select subcosn
-	fmt.Println("*** gcpPicker starts picking subconn")
-	if len(p.scRefs) <= 0 {
-		return nil, nil, balancer.ErrNoSubConnAvailable
-	}
-
-	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
-	boundKey := ""
-
-	fmt.Printf("*** before pre process: p.affinityMap: %+v\n", p.affinityMap)
-
-	if hasGcpCtx {
-		// pre process
-		fmt.Println("*** starting pre process")
-		affinity := gcpCtx.affinityCfg
-		channelPool := gcpCtx.channelPoolCfg
-		if channelPool != nil {
-			// Initialize p.maxConn and p.maxStream for the first time.
-			if p.maxConn == 0 {
-				if channelPool.GetMaxSize() == 0{
-					p.maxConn = defaultMaxConn
-				} else {
-					p.maxConn = channelPool.GetMaxSize()
-				}
-			}
-			if p.maxStream == 0 {
-				if channelPool.GetMaxConcurrentStreamsLowWatermark() == 0 {
-					p.maxStream = defaultMaxStream
-				} else {
-					p.maxStream = channelPool.GetMaxConcurrentStreamsLowWatermark()
-				}
-			}
-		}
-		locator := affinity.GetAffinityKey()
-		cmd := affinity.GetCommand()
-		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
-			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to retrieve affinity key from request message: %v", err)
-			}
-			boundKey = a
-		}
-	}
-
-	p.mu.Lock()
-	scRef := p.getSubConnRef(boundKey)
-	if scRef == nil {
-		return nil, nil, balancer.ErrNoSubConnAvailable
-	}
-	scRef.streamsCnt++
-	sc := scRef.subConn
-	p.mu.Unlock()
-
-	// post process
-	callback := func (info balancer.DoneInfo) {
-		fmt.Println("*** starting post process")
-		if info.Err == nil {
-			if hasGcpCtx {
-				affinity := gcpCtx.affinityCfg
-				locator := affinity.GetAffinityKey()
-				cmd := affinity.GetCommand()
-				if cmd == AffinityConfig_BIND {
-					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
-					if err == nil {
-						_, ok := p.affinityMap[bindKey]
-						if !ok {
-							p.affinityMap[bindKey] = scRef
-						}
-						p.affinityMap[bindKey].affinityCnt++
-					}
-				} else if cmd == AffinityConfig_UNBIND {
-					boundRef, ok := p.affinityMap[boundKey]
-					if ok {
-						boundRef.affinityCnt--
-						if boundRef.affinityCnt <= 0 {
-							delete(p.affinityMap, boundKey)
-						}
-					}
-				}
-			}
-		}
-		scRef.streamsCnt--
-		fmt.Printf("*** after post process: p.affinityMap: %+v\n", p.affinityMap)
-	}
-	return sc, callback, nil
-}
-
-func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
-	if boundKey != "" {
-		ref, ok := p.affinityMap[boundKey]
-		if ok {
-			return ref
-		}
-	}
-	sort.Slice(p.scRefs[:], func(i, j int) bool {
-		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
-	})
-
-	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < p.maxStream {
-		return p.scRefs[0]
-	}
-
-	if len(p.scRefs) < int(p.maxConn) {
-		// create a new subconn if all current subconns are busy
-		fmt.Println("*** creating new subconn")
-		sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
-		if err == nil {
-			sc.Connect()
-			newRef := &subConnRef{subConn: sc}
-			p.scRefs = append(p.scRefs, newRef)
-			return newRef
-		}
-	}
-
-	if len(p.scRefs) == 0 {
-		return nil
-	}
-
-	return p.scRefs[0]
-}
-
-func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey string, err error) {
-	if locator == "" {
-		return "", fmt.Errorf("affinityKey locator is not valid")
-	}
-
-	names := strings.Split(locator, ".")
-	val := reflect.ValueOf(msg).Elem()
-
-	var ak string
-	i := 0
-	for ; i < len(names); i++ {
-		name := names[i]
-		titledName := strings.Title(name)
-		valField := val.FieldByName(titledName)
-		if valField.IsValid() {
-			switch valField.Kind() {
-			case reflect.String:
-				ak = valField.String()
-				break
-			case reflect.Interface:
-				val = reflect.ValueOf(valField.Interface())
-			default:
-				return "", fmt.Errorf("field %s in message is neither a string nor another message", titledName)
-			}
-		}
-	}
-	if i == len(names) {
-		return ak, nil
-	}
-
-	return "", fmt.Errorf("cannot get valid affinity key")
+func init() {
+	balancer.Register(newBuilder())
 }
