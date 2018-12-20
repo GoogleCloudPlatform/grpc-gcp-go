@@ -9,16 +9,11 @@ import (
 	"reflect"
 
 	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/resolver"
 )
 
 type gcpPickerBuilder struct{}
 
-func (gpb *gcpPickerBuilder) Build(readySCs []balancer.SubConn, gb *gcpBalancer) balancer.Picker {
-	var refs []*subConnRef
-	for _, sc := range readySCs {
-		refs = append(refs, &subConnRef{subConn: sc})
-	}
+func (gpb *gcpPickerBuilder) Build(refs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs: refs,
@@ -35,7 +30,6 @@ type subConnRef struct {
 type gcpPicker struct {
 	gcpBalancer *gcpBalancer
 	scRefs      []*subConnRef
-	addrs       []resolver.Address
 	mu          sync.Mutex
 	affinityMap map[string]*subConnRef
 	maxConn     uint32
@@ -55,7 +49,6 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	fmt.Printf("*** before pre process: p.affinityMap: %+v\n", p.affinityMap)
 
 	if hasGcpCtx {
-		// pre process
 		fmt.Println("*** starting pre process")
 		affinity := gcpCtx.affinityCfg
 		channelPool := gcpCtx.channelPoolCfg
@@ -95,7 +88,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	scRef.streamsCnt++
 	p.mu.Unlock()
 
-	// post process
+	// define callback for post process
 	callback := func (info balancer.DoneInfo) {
 		fmt.Println("*** starting post process")
 		if info.Err == nil {
@@ -129,6 +122,8 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	return scRef.subConn, callback, nil
 }
 
+// getSubConnRef returns the subConnRef object that contains the subconn
+// ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	if boundKey != "" {
 		ref, ok := p.affinityMap[boundKey]
@@ -148,7 +143,7 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 		// Ask balancer to create new subconn when all current subconns are busy,
 		// and let this picker return ErrNoSubConnAvailable.
 		fmt.Println("*** creating new subconn")
-		p.gcpBalancer.createNewSubconn()
+		p.gcpBalancer.createNewSubConn()
 		return nil
 	}
 
@@ -159,6 +154,8 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	return p.scRefs[0]
 }
 
+// getAffinityKeyFromMessage retrieves the affinity key from proto message using the key locator
+// defined in the affinity config.
 func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey string, err error) {
 	if locator == "" {
 		return "", fmt.Errorf("affinityKey locator is not valid")

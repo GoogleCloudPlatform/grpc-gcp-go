@@ -47,7 +47,7 @@ func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOp
 		cc:            cc,
 		pickerBuilder: bb.pickerBuilder,
 
-		subConns: []balancer.SubConn{},
+		scRefs: make(map[balancer.SubConn]*subConnRef),
 		scStates: make(map[balancer.SubConn]connectivity.State),
 		csEvltr:  &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
@@ -120,7 +120,8 @@ type gcpBalancer struct {
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
 
-	subConns []balancer.SubConn
+	// subConns []balancer.SubConn
+	scRefs   map[balancer.SubConn]*subConnRef
 	scStates map[balancer.SubConn]connectivity.State
 	picker   balancer.Picker
 	config   base.Config
@@ -135,23 +136,25 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 	grpclog.Infoln("grpc_gcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
-	if len(gb.subConns) == 0 {
-		gb.createNewSubconn()
+	if len(gb.scRefs) == 0 {
+		gb.createNewSubConn()
 	} else {
-		for _, sc := range gb.subConns {
-			sc.UpdateAddresses(addrs)
-			sc.Connect()
+		for _, scRef := range gb.scRefs {
+			// TODO(weiranf): update streams count when new addrs resolved
+			scRef.subConn.UpdateAddresses(addrs)
+			scRef.subConn.Connect()
 		}
 	}
 }
 
-func (gb *gcpBalancer) createNewSubconn() {
+func (gb *gcpBalancer) createNewSubConn() {
 	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
 	if err != nil {
 		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
 		return
 	}
-	gb.subConns = append(gb.subConns, sc)
+	// gb.subConns = append(gb.subConns, sc)
+	gb.scRefs[sc] = &subConnRef{subConn: sc}
 	gb.scStates[sc] = connectivity.Idle
 	sc.Connect()
 }
@@ -165,15 +168,15 @@ func (gb *gcpBalancer) regeneratePicker() {
 		gb.picker = base.NewErrPicker(balancer.ErrTransientFailure)
 		return
 	}
-	readySCs := []balancer.SubConn{}
+	readyRefs := []*subConnRef{}
 
 	// Filter out all ready SCs from full subConn map.
-	for _, sc := range gb.subConns {
+	for sc, scRef := range gb.scRefs {
 		if st, ok := gb.scStates[sc]; ok && st == connectivity.Ready {
-			readySCs = append(readySCs, sc)
+			readyRefs = append(readyRefs, scRef)
 		}
 	}
-	gb.picker = gb.pickerBuilder.Build(readySCs, gb)
+	gb.picker = gb.pickerBuilder.Build(readyRefs, gb)
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
@@ -188,9 +191,8 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 	case connectivity.Idle:
 		sc.Connect()
 	case connectivity.Shutdown:
-		// When an address was removed by resolver, b called RemoveSubConn but
-		// kept the sc's state in scStates. Remove state for this sc here.
 		delete(gb.scStates, sc)
+		delete(gb.scRefs, sc)
 	}
 
 	oldAggrState := gb.state
