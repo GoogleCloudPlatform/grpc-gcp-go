@@ -32,7 +32,7 @@ import (
 // Name is the name of grpc_gcp balancer.
 const Name = "grpc_gcp"
 
-// Default settings for max pool size and max concurrent  streams.
+// Default settings for max pool size and max concurrent streams.
 const defaultMaxConn = 10
 const defaultMaxStream = 100
 
@@ -47,8 +47,8 @@ func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOp
 		cc:            cc,
 		pickerBuilder: bb.pickerBuilder,
 
+		affinityMap: make(map[string]*subConnRef),
 		scRefs: make(map[balancer.SubConn]*subConnRef),
-		scStates: make(map[balancer.SubConn]connectivity.State),
 		csEvltr:  &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
@@ -112,6 +112,13 @@ func (cse *connectivityStateEvaluator) recordTransition(oldState, newState conne
 	return connectivity.TransientFailure
 }
 
+type subConnRef struct {
+	subConn     balancer.SubConn
+	scState     connectivity.State
+	affinityCnt uint32
+	streamsCnt  uint32
+}
+
 type gcpBalancer struct {
 	addrs         []resolver.Address
 	cc            balancer.ClientConn
@@ -120,9 +127,9 @@ type gcpBalancer struct {
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
 
-	// subConns []balancer.SubConn
-	scRefs   map[balancer.SubConn]*subConnRef
-	scStates map[balancer.SubConn]connectivity.State
+	affinityMap map[string]*subConnRef
+	scRefs      map[balancer.SubConn]*subConnRef
+
 	picker   balancer.Picker
 	config   base.Config
 }
@@ -153,10 +160,31 @@ func (gb *gcpBalancer) createNewSubConn() {
 		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
 		return
 	}
-	// gb.subConns = append(gb.subConns, sc)
-	gb.scRefs[sc] = &subConnRef{subConn: sc}
-	gb.scStates[sc] = connectivity.Idle
+	gb.scRefs[sc] = &subConnRef{
+		subConn: sc,
+		scState: connectivity.Idle,
+		streamsCnt: 0,
+		affinityCnt: 0,
+	}
 	sc.Connect()
+}
+
+func (gb *gcpBalancer) bindSubConn(bindKey string, scRef *subConnRef) {
+	_, ok := gb.affinityMap[bindKey]
+	if !ok {
+		gb.affinityMap[bindKey] = scRef
+	}
+	gb.affinityMap[bindKey].affinityCnt++
+}
+
+func (gb *gcpBalancer) unbindSubConn(boundKey string) {
+	boundRef, ok := gb.affinityMap[boundKey]
+	if ok {
+		boundRef.affinityCnt--
+		if boundRef.affinityCnt <= 0 {
+			delete(gb.affinityMap, boundKey)
+		}
+	}
 }
 
 // regeneratePicker takes a snapshot of the balancer, and generates a picker
@@ -171,8 +199,8 @@ func (gb *gcpBalancer) regeneratePicker() {
 	readyRefs := []*subConnRef{}
 
 	// Filter out all ready SCs from full subConn map.
-	for sc, scRef := range gb.scRefs {
-		if st, ok := gb.scStates[sc]; ok && st == connectivity.Ready {
+	for _, scRef := range gb.scRefs {
+		if scRef.scState == connectivity.Ready {
 			readyRefs = append(readyRefs, scRef)
 		}
 	}
@@ -180,18 +208,18 @@ func (gb *gcpBalancer) regeneratePicker() {
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
-	grpclog.Infof("base.baseBalancer: handle SubConn state change: %p, %v", sc, s)
-	oldS, ok := gb.scStates[sc]
+	grpclog.Infof("grpc_gcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
+	scRef, ok := gb.scRefs[sc]
 	if !ok {
-		grpclog.Infof("base.baseBalancer: got state changes for an unknown SubConn: %p, %v", sc, s)
+		grpclog.Infof("grpc_gcp.gcpBalancer: got state changes for an unknown SubConn: %p, %v", sc, s)
 		return
 	}
-	gb.scStates[sc] = s
+	oldS := scRef.scState
+	scRef.scState = s
 	switch s {
 	case connectivity.Idle:
 		sc.Connect()
 	case connectivity.Shutdown:
-		delete(gb.scStates, sc)
 		delete(gb.scRefs, sc)
 	}
 

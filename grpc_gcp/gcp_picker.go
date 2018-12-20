@@ -1,6 +1,7 @@
 package grpc_gcp
 
 import (
+	"google.golang.org/grpc/connectivity"
 	"fmt"
 	"context"
 	"sync"
@@ -13,25 +14,17 @@ import (
 
 type gcpPickerBuilder struct{}
 
-func (gpb *gcpPickerBuilder) Build(refs []*subConnRef, gb *gcpBalancer) balancer.Picker {
+func (gpb *gcpPickerBuilder) Build(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
-		scRefs: refs,
-		affinityMap: make(map[string]*subConnRef),
+		scRefs: readySCRefs,
 	}
-}
-
-type subConnRef struct {
-	subConn     balancer.SubConn
-	affinityCnt uint32
-	streamsCnt  uint32
 }
 
 type gcpPicker struct {
 	gcpBalancer *gcpBalancer
 	scRefs      []*subConnRef
 	mu          sync.Mutex
-	affinityMap map[string]*subConnRef
 	maxConn     uint32
 	maxStream   uint32
 }
@@ -46,7 +39,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 
-	fmt.Printf("*** before pre process: p.affinityMap: %+v\n", p.affinityMap)
+	fmt.Printf("*** before pre process: affinityMap: %+v\n", p.gcpBalancer.affinityMap)
 
 	if hasGcpCtx {
 		fmt.Println("*** starting pre process")
@@ -99,25 +92,15 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 				if cmd == AffinityConfig_BIND {
 					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
 					if err == nil {
-						_, ok := p.affinityMap[bindKey]
-						if !ok {
-							p.affinityMap[bindKey] = scRef
-						}
-						p.affinityMap[bindKey].affinityCnt++
+						p.gcpBalancer.bindSubConn(bindKey, scRef)
 					}
 				} else if cmd == AffinityConfig_UNBIND {
-					boundRef, ok := p.affinityMap[boundKey]
-					if ok {
-						boundRef.affinityCnt--
-						if boundRef.affinityCnt <= 0 {
-							delete(p.affinityMap, boundKey)
-						}
-					}
+					p.gcpBalancer.unbindSubConn(boundKey)
 				}
 			}
 		}
 		scRef.streamsCnt--
-		fmt.Printf("*** after post process: p.affinityMap: %+v\n", p.affinityMap)
+		fmt.Printf("*** after post process: affinityMap: %+v\n", p.gcpBalancer.affinityMap)
 	}
 	return scRef.subConn, callback, nil
 }
@@ -126,11 +109,17 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 // ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	if boundKey != "" {
-		ref, ok := p.affinityMap[boundKey]
-		if ok {
-			return ref
+		if ref, ok := p.gcpBalancer.affinityMap[boundKey]; ok {
+			if ref.scState != connectivity.Ready {
+				// It's possible that the bound subconn is not in the readySubConns list,
+				// If it's not ready yet, we throw ErrNoSubConnAvailable
+				return nil
+			} else {
+				return ref
+			}
 		}
 	}
+
 	sort.Slice(p.scRefs[:], func(i, j int) bool {
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
