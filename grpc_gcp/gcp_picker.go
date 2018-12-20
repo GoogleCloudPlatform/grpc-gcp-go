@@ -12,23 +12,15 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
-type gcpPickerBuilder struct{
-	cc balancer.ClientConn
-}
+type gcpPickerBuilder struct{}
 
-func (gpb *gcpPickerBuilder) Build(readySCs map[resolver.Address]balancer.SubConn) balancer.Picker {
+func (gpb *gcpPickerBuilder) Build(readySCs []balancer.SubConn) balancer.Picker {
 	var refs []*subConnRef
 	for _, sc := range readySCs {
 		refs = append(refs, &subConnRef{subConn: sc})
 	}
-	addrs := make([]resolver.Address, 0, len(readySCs))
-	for addr := range readySCs {
-		addrs = append(addrs, addr)
-	}
 	return &gcpPicker{
-		addrs:  addrs,
 		scRefs: refs,
-		cc: gpb.cc,
 		affinityMap: make(map[string]*subConnRef),
 	}
 }
@@ -42,7 +34,6 @@ type subConnRef struct {
 type gcpPicker struct {
 	scRefs      []*subConnRef
 	addrs       []resolver.Address
-	cc          balancer.ClientConn
 	mu          sync.Mutex
 	affinityMap map[string]*subConnRef
 	maxConn     uint32
@@ -152,17 +143,17 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 		return p.scRefs[0]
 	}
 
-	if len(p.scRefs) < int(p.maxConn) {
-		// create a new subconn if all current subconns are busy
-		fmt.Println("*** creating new subconn")
-		sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
-		if err == nil {
-			sc.Connect()
-			newRef := &subConnRef{subConn: sc}
-			p.scRefs = append(p.scRefs, newRef)
-			return newRef
-		}
-	}
+	// if len(p.scRefs) < int(p.maxConn) {
+	// 	// create a new subconn if all current subconns are busy
+	// 	fmt.Println("*** creating new subconn")
+	// 	sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
+	// 	if err == nil {
+	// 		sc.Connect()
+	// 		newRef := &subConnRef{subConn: sc}
+	// 		p.scRefs = append(p.scRefs, newRef)
+	// 		return newRef
+	// 	}
+	// }
 
 	if len(p.scRefs) == 0 {
 		return nil
