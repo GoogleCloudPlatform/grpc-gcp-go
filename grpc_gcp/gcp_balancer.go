@@ -113,6 +113,7 @@ func (cse *connectivityStateEvaluator) recordTransition(oldState, newState conne
 }
 
 type gcpBalancer struct {
+	addrs         []resolver.Address
 	cc            balancer.ClientConn
 	pickerBuilder *gcpPickerBuilder
 
@@ -132,9 +133,10 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 	}
 	fmt.Printf("*** got resolved addresses: %+v\n", addrs)
 	grpclog.Infoln("grpc_gcp.gcpBalancer: got new resolved addresses: ", addrs)
+	gb.addrs = addrs
 
 	if len(gb.subConns) == 0 {
-		gb.createNewSubconn(addrs)
+		gb.createNewSubconn()
 	} else {
 		for _, sc := range gb.subConns {
 			sc.UpdateAddresses(addrs)
@@ -143,8 +145,8 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 	}
 }
 
-func (gb *gcpBalancer) createNewSubconn(addrs []resolver.Address) {
-	sc, err := gb.cc.NewSubConn(addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
+func (gb *gcpBalancer) createNewSubconn() {
+	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
 	if err != nil {
 		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
 		return
@@ -171,7 +173,7 @@ func (gb *gcpBalancer) regeneratePicker() {
 			readySCs = append(readySCs, sc)
 		}
 	}
-	gb.picker = gb.pickerBuilder.Build(readySCs)
+	gb.picker = gb.pickerBuilder.Build(readySCs, gb)
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {

@@ -14,12 +14,13 @@ import (
 
 type gcpPickerBuilder struct{}
 
-func (gpb *gcpPickerBuilder) Build(readySCs []balancer.SubConn) balancer.Picker {
+func (gpb *gcpPickerBuilder) Build(readySCs []balancer.SubConn, gb *gcpBalancer) balancer.Picker {
 	var refs []*subConnRef
 	for _, sc := range readySCs {
 		refs = append(refs, &subConnRef{subConn: sc})
 	}
 	return &gcpPicker{
+		gcpBalancer: gb,
 		scRefs: refs,
 		affinityMap: make(map[string]*subConnRef),
 	}
@@ -32,6 +33,7 @@ type subConnRef struct {
 }
 
 type gcpPicker struct {
+	gcpBalancer *gcpBalancer
 	scRefs      []*subConnRef
 	addrs       []resolver.Address
 	mu          sync.Mutex
@@ -91,7 +93,6 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
 	scRef.streamsCnt++
-	sc := scRef.subConn
 	p.mu.Unlock()
 
 	// post process
@@ -125,7 +126,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		scRef.streamsCnt--
 		fmt.Printf("*** after post process: p.affinityMap: %+v\n", p.affinityMap)
 	}
-	return sc, callback, nil
+	return scRef.subConn, callback, nil
 }
 
 func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
@@ -143,17 +144,13 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 		return p.scRefs[0]
 	}
 
-	// if len(p.scRefs) < int(p.maxConn) {
-	// 	// create a new subconn if all current subconns are busy
-	// 	fmt.Println("*** creating new subconn")
-	// 	sc, err := p.cc.NewSubConn(p.addrs, balancer.NewSubConnOptions{})
-	// 	if err == nil {
-	// 		sc.Connect()
-	// 		newRef := &subConnRef{subConn: sc}
-	// 		p.scRefs = append(p.scRefs, newRef)
-	// 		return newRef
-	// 	}
-	// }
+	if len(p.scRefs) < int(p.maxConn) {
+		// Ask balancer to create new subconn when all current subconns are busy,
+		// and let this picker return ErrNoSubConnAvailable.
+		fmt.Println("*** creating new subconn")
+		p.gcpBalancer.createNewSubconn()
+		return nil
+	}
 
 	if len(p.scRefs) == 0 {
 		return nil
