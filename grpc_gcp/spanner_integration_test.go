@@ -25,7 +25,7 @@ func initClientConn(t *testing.T) *grpc.ClientConn {
 	}
 	apiConfig := ApiConfig{
 		ChannelPool: &ChannelPoolConfig{
-			MaxSize: 10,
+			MaxSize: 3,
 			MaxConcurrentStreamsLowWatermark: 1,
 		},
 		Method: []*MethodConfig{
@@ -48,6 +48,20 @@ func initClientConn(t *testing.T) *grpc.ClientConn {
 				Affinity: &AffinityConfig{
 					Command: AffinityConfig_UNBIND,
 					AffinityKey: "name",
+				},
+			},
+			&MethodConfig{
+				Name: []string{"/google.spanner.v1.Spanner/ExecuteSql"},
+				Affinity: &AffinityConfig{
+					Command: AffinityConfig_BOUND,
+					AffinityKey: "session",
+				},
+			},
+			&MethodConfig{
+				Name: []string{"/google.spanner.v1.Spanner/ExecuteStreamingSql"},
+				Affinity: &AffinityConfig{
+					Command: AffinityConfig_BOUND,
+					AffinityKey: "session",
 				},
 			},
 		},

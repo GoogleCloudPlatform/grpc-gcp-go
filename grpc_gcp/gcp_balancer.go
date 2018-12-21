@@ -147,7 +147,7 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 		gb.createNewSubConn()
 	} else {
 		for _, scRef := range gb.scRefs {
-			// TODO(weiranf): update streams count when new addrs resolved
+			// TODO(weiranf): update streams count when new addrs resolved?
 			scRef.subConn.UpdateAddresses(addrs)
 			scRef.subConn.Connect()
 		}
