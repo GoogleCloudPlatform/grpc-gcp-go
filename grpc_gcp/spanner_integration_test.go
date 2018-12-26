@@ -1,7 +1,7 @@
 package grpc_gcp
 
 import (
-	// "fmt"
+	"fmt"
 	"context"
 	"log"
 	"os"
@@ -16,8 +16,10 @@ import (
 const Target = "spanner.googleapis.com:443"
 const Scope = "https://www.googleapis.com/auth/cloud-platform"
 const Database = "projects/grpc-gcp/instances/sample/databases/benchmark"
+const TestSql = "select id from storage"
+const TestColumnData = "payload"
 
-func initClientConn(t *testing.T) *grpc.ClientConn {
+func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, Scope)
 	if err != nil {
@@ -25,8 +27,8 @@ func initClientConn(t *testing.T) *grpc.ClientConn {
 	}
 	apiConfig := ApiConfig{
 		ChannelPool: &ChannelPoolConfig{
-			MaxSize: 3,
-			MaxConcurrentStreamsLowWatermark: 1,
+			MaxSize: maxSize,
+			MaxConcurrentStreamsLowWatermark: maxStreams,
 		},
 		Method: []*MethodConfig{
 			&MethodConfig{
@@ -80,20 +82,32 @@ func initClientConn(t *testing.T) *grpc.ClientConn {
 	return conn
 }
 
-func TestSessionManagement(t *testing.T) {
-	conn := initClientConn(t)
-	defer conn.Close()
-
-	client := spanner.NewSpannerClient(conn)
-
+func createSession(t *testing.T, client spanner.SpannerClient) *spanner.Session {
 	createSessionRequest := spanner.CreateSessionRequest{
 		Database: Database,
 	}
 	session, err := client.CreateSession(context.Background(), &createSessionRequest)
 	if err != nil {
-		t.Errorf("CreateSession failed due to error: %s", err.Error())
+		t.Fatalf("CreateSession failed due to error: %s", err.Error())
 	}
+	return session
+}
 
+func deleteSession(t *testing.T, client spanner.SpannerClient, sessionName string) {
+	deleteSessionRequest := spanner.DeleteSessionRequest{
+		Name: sessionName,
+	}
+	_, err := client.DeleteSession(context.Background(), &deleteSessionRequest)
+	if err != nil {
+		t.Errorf("DeleteSession failed due to error: %s", err.Error())
+	}
+}
+
+func TestSessionManagement(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	session := createSession(t, client)
 	sessionName := session.GetName()
 
 	getSessionRequest := spanner.GetSessionRequest{
@@ -107,11 +121,27 @@ func TestSessionManagement(t *testing.T) {
 		t.Errorf("GetSession returns different session name: %s, should be: %s", getRes.GetName(), sessionName)
 	}
 
-	deleteSessionRequest := spanner.DeleteSessionRequest{
-		Name: sessionName,
+	deleteSession(t, client, sessionName)
+}
+
+func TestExecuteSql(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	session := createSession(t, client)
+	sessionName := session.GetName()
+
+	executeSqlReq := spanner.ExecuteSqlRequest{
+		Session: sessionName,
+		Sql: TestSql,
 	}
-	_, err = client.DeleteSession(context.Background(), &deleteSessionRequest)
+	resSet, err := client.ExecuteSql(context.Background(), &executeSqlReq)
 	if err != nil {
-		t.Errorf("DeleteSession failed due to error: %s", err.Error())
+		t.Fatalf("ExecuteSql failed due to error: %s", err.Error())
 	}
+	if strVal := resSet.GetRows()[0].GetValues()[0].GetStringValue(); strVal != TestColumnData {
+		t.Errorf("ExecuteSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+	}
+
+	deleteSession(t, client, sessionName)
 }

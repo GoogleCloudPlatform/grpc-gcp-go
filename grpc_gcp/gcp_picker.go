@@ -15,6 +15,7 @@ import (
 type gcpPickerBuilder struct{}
 
 func (gpb *gcpPickerBuilder) Build(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
+	fmt.Printf("*** Building new picker with ready subConnRefs: %+v\n", readySCRefs)
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs: readySCRefs,
@@ -31,7 +32,6 @@ type gcpPicker struct {
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
 	// TODO: use affinityKey to select subcosn
-	fmt.Println("*** gcpPicker starts picking subconn")
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
@@ -39,10 +39,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 
-	fmt.Printf("*** before pre process: affinityMap: %+v\n", p.gcpBalancer.affinityMap)
-
 	if hasGcpCtx {
-		fmt.Println("*** starting pre process")
 		affinity := gcpCtx.affinityCfg
 		channelPool := gcpCtx.channelPoolCfg
 		if channelPool != nil {
@@ -71,19 +68,22 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 			}
 			boundKey = a
 		}
+		fmt.Printf("xxx cmd: %v, locator: %s, boundKey: %s\n", cmd, locator, boundKey)
 	}
 
+	fmt.Println("--> p.mu.Lock()")
 	p.mu.Lock()
 	scRef := p.getSubConnRef(boundKey)
 	if scRef == nil {
+		p.mu.Unlock()
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
 	scRef.streamsCnt++
 	p.mu.Unlock()
+	fmt.Println("--< p.mu unlocked")
 
 	// define callback for post process
 	callback := func (info balancer.DoneInfo) {
-		fmt.Println("*** starting post process")
 		if info.Err == nil {
 			if hasGcpCtx {
 				affinity := gcpCtx.affinityCfg
@@ -100,7 +100,6 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 			}
 		}
 		scRef.streamsCnt--
-		fmt.Printf("*** after post process: affinityMap: %+v\n", p.gcpBalancer.affinityMap)
 	}
 	return scRef.subConn, callback, nil
 }
@@ -111,10 +110,12 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	if boundKey != "" {
 		if ref, ok := p.gcpBalancer.affinityMap[boundKey]; ok {
 			if ref.scState != connectivity.Ready {
+				fmt.Println("****** bound connection is not READY")
 				// It's possible that the bound subconn is not in the readySubConns list,
 				// If it's not ready yet, we throw ErrNoSubConnAvailable
 				return nil
 			} else {
+				fmt.Println("****** bound connection is READY")
 				return ref
 			}
 		}
@@ -131,7 +132,6 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef{
 	if len(p.scRefs) < int(p.maxConn) {
 		// Ask balancer to create new subconn when all current subconns are busy,
 		// and let this picker return ErrNoSubConnAvailable.
-		fmt.Println("*** creating new subconn")
 		p.gcpBalancer.createNewSubConn()
 		return nil
 	}

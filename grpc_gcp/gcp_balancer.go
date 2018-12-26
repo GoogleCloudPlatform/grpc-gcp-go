@@ -135,11 +135,11 @@ type gcpBalancer struct {
 }
 
 func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
+	fmt.Println("*** gcpBalancer.HandleResolvedAddrs()")
 	if err != nil {
 		grpclog.Infof("grpc_gcp.gcpBalancer: HandleResolvedAddrs called with error %v", err)
 		return
 	}
-	fmt.Printf("*** got resolved addresses: %+v\n", addrs)
 	grpclog.Infoln("grpc_gcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
@@ -155,6 +155,7 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 }
 
 func (gb *gcpBalancer) createNewSubConn() {
+	fmt.Println("*** p.gcpBalancer.createNewSubConn()")
 	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
 	if err != nil {
 		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
@@ -208,6 +209,7 @@ func (gb *gcpBalancer) regeneratePicker() {
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
+	fmt.Printf("*** gcpBalancer.HandleSubConnStateChange(sc: %p, s: %v)\n", sc, s)
 	grpclog.Infof("grpc_gcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 	scRef, ok := gb.scRefs[sc]
 	if !ok {
