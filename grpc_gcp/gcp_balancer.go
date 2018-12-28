@@ -19,14 +19,11 @@
 package grpc_gcp
 
 import (
-	"fmt"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
-	// "google.golang.org/grpc/metadata"
-	// "runtime/debug"
 )
 
 // Name is the name of grpc_gcp balancer.
@@ -36,7 +33,7 @@ const Name = "grpc_gcp"
 const defaultMaxConn = 10
 const defaultMaxStream = 100
 
-type gcpBalancerBuilder struct{
+type gcpBalancerBuilder struct {
 	name          string
 	pickerBuilder *gcpPickerBuilder
 	config        base.Config
@@ -48,8 +45,8 @@ func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOp
 		pickerBuilder: bb.pickerBuilder,
 
 		affinityMap: make(map[string]*subConnRef),
-		scRefs: make(map[balancer.SubConn]*subConnRef),
-		csEvltr:  &connectivityStateEvaluator{},
+		scRefs:      make(map[balancer.SubConn]*subConnRef),
+		csEvltr:     &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
 		// may call UpdateBalancerState with this picker.
@@ -65,9 +62,9 @@ func (*gcpBalancerBuilder) Name() string {
 // newBuilder creates a new grpc_gcp balancer builder.
 func newBuilder() balancer.Builder {
 	return &gcpBalancerBuilder{
-		name: Name,
+		name:          Name,
 		pickerBuilder: &gcpPickerBuilder{},
-		config: base.Config{HealthCheck: true},
+		config:        base.Config{HealthCheck: true},
 	}
 }
 
@@ -130,12 +127,11 @@ type gcpBalancer struct {
 	affinityMap map[string]*subConnRef
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker   balancer.Picker
-	config   base.Config
+	picker balancer.Picker
+	config base.Config
 }
 
 func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
-	fmt.Println("*** gcpBalancer.HandleResolvedAddrs()")
 	if err != nil {
 		grpclog.Infof("grpc_gcp.gcpBalancer: HandleResolvedAddrs called with error %v", err)
 		return
@@ -155,16 +151,15 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 }
 
 func (gb *gcpBalancer) createNewSubConn() {
-	fmt.Println("*** p.gcpBalancer.createNewSubConn()")
 	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
 	if err != nil {
 		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
-		subConn: sc,
-		scState: connectivity.Idle,
-		streamsCnt: 0,
+		subConn:     sc,
+		scState:     connectivity.Idle,
+		streamsCnt:  0,
 		affinityCnt: 0,
 	}
 	sc.Connect()
@@ -209,7 +204,6 @@ func (gb *gcpBalancer) regeneratePicker() {
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
-	fmt.Printf("*** gcpBalancer.HandleSubConnStateChange(sc: %p, s: %v)\n", sc, s)
 	grpclog.Infof("grpc_gcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 	scRef, ok := gb.scRefs[sc]
 	if !ok {
@@ -236,9 +230,8 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 	if (s == connectivity.Ready) != (oldS == connectivity.Ready) ||
 		(gb.state == connectivity.TransientFailure) != (oldAggrState == connectivity.TransientFailure) {
 		gb.regeneratePicker()
+		gb.cc.UpdateBalancerState(gb.state, gb.picker)
 	}
-
-	gb.cc.UpdateBalancerState(gb.state, gb.picker)
 }
 
 func (gb *gcpBalancer) Close() {

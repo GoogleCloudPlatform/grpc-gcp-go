@@ -1,7 +1,6 @@
 package grpc_gcp
 
 import (
-	"fmt"
 	"context"
 	"log"
 	"os"
@@ -16,7 +15,7 @@ import (
 const Target = "spanner.googleapis.com:443"
 const Scope = "https://www.googleapis.com/auth/cloud-platform"
 const Database = "projects/grpc-gcp/instances/sample/databases/benchmark"
-const TestSql = "select id from storage"
+const TestSQL = "select id from storage"
 const TestColumnData = "payload"
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
@@ -27,42 +26,42 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	}
 	apiConfig := ApiConfig{
 		ChannelPool: &ChannelPoolConfig{
-			MaxSize: maxSize,
+			MaxSize:                          maxSize,
 			MaxConcurrentStreamsLowWatermark: maxStreams,
 		},
 		Method: []*MethodConfig{
 			&MethodConfig{
 				Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
 				Affinity: &AffinityConfig{
-					Command: AffinityConfig_BIND,
+					Command:     AffinityConfig_BIND,
 					AffinityKey: "name",
 				},
 			},
 			&MethodConfig{
 				Name: []string{"/google.spanner.v1.Spanner/GetSession"},
 				Affinity: &AffinityConfig{
-					Command: AffinityConfig_BOUND,
+					Command:     AffinityConfig_BOUND,
 					AffinityKey: "name",
 				},
 			},
 			&MethodConfig{
 				Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
 				Affinity: &AffinityConfig{
-					Command: AffinityConfig_UNBIND,
+					Command:     AffinityConfig_UNBIND,
 					AffinityKey: "name",
 				},
 			},
 			&MethodConfig{
 				Name: []string{"/google.spanner.v1.Spanner/ExecuteSql"},
 				Affinity: &AffinityConfig{
-					Command: AffinityConfig_BOUND,
+					Command:     AffinityConfig_BOUND,
 					AffinityKey: "session",
 				},
 			},
 			&MethodConfig{
 				Name: []string{"/google.spanner.v1.Spanner/ExecuteStreamingSql"},
 				Affinity: &AffinityConfig{
-					Command: AffinityConfig_BOUND,
+					Command:     AffinityConfig_BOUND,
 					AffinityKey: "session",
 				},
 			},
@@ -75,6 +74,7 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 		grpc.WithPerRPCCredentials(perRPC),
 		grpc.WithBalancerName("grpc_gcp"),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
+		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
 	)
 	if err != nil {
 		t.Errorf("Creation of ClientConn failed due to error: %s", err.Error())
@@ -133,7 +133,7 @@ func TestExecuteSql(t *testing.T) {
 
 	executeSqlReq := spanner.ExecuteSqlRequest{
 		Session: sessionName,
-		Sql: TestSql,
+		Sql:     TestSQL,
 	}
 	resSet, err := client.ExecuteSql(context.Background(), &executeSqlReq)
 	if err != nil {
@@ -144,4 +144,101 @@ func TestExecuteSql(t *testing.T) {
 	}
 
 	deleteSession(t, client, sessionName)
+}
+
+func TestOneStream(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	session := createSession(t, client)
+	sessionName := session.GetName()
+
+	executeSqlReq := spanner.ExecuteSqlRequest{
+		Session: sessionName,
+		Sql:     TestSQL,
+	}
+	stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+	if err != nil {
+		t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
+	}
+	partial, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Receiving streaming results failed due to error :%s", err.Error())
+	}
+	if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
+		t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+	}
+
+	deleteSession(t, client, sessionName)
+}
+
+func TestMultipleStreamsInSameSession(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	session := createSession(t, client)
+	sessionName := session.GetName()
+
+	executeSqlReq := spanner.ExecuteSqlRequest{
+		Session: sessionName,
+		Sql:     TestSQL,
+	}
+	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	for i := 0; i < 2; i++ {
+		stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+		streams = append(streams, stream)
+		if err != nil {
+			t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
+		}
+	}
+
+	for _, stream := range streams {
+		partial, err := stream.Recv()
+		if err != nil {
+			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
+		} else {
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			}
+		}
+	}
+
+	deleteSession(t, client, sessionName)
+}
+
+func TestMultipleSessions(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	sessions := []string{}
+	for i := 0; i < 2; i++ {
+		session := createSession(t, client)
+		sessionName := session.GetName()
+		sessions = append(sessions, sessionName)
+		executeSqlReq := spanner.ExecuteSqlRequest{
+			Session: sessionName,
+			Sql:     TestSQL,
+		}
+		stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+		streams = append(streams, stream)
+		if err != nil {
+			t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
+		}
+	}
+
+	for _, stream := range streams {
+		partial, err := stream.Recv()
+		if err != nil {
+			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
+		} else {
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			}
+		}
+	}
+
+	for _, session := range sessions {
+		deleteSession(t, client, session)
+	}
 }
