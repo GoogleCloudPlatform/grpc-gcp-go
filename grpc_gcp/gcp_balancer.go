@@ -39,8 +39,11 @@ type gcpBalancerBuilder struct {
 	config        base.Config
 }
 
+// currBalancer keeps the reference for the currently used balancer, only for testings.
+var currBalancer *gcpBalancer
+
 func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOptions) balancer.Balancer {
-	return &gcpBalancer{
+	currBalancer = &gcpBalancer{
 		cc:            cc,
 		pickerBuilder: bb.pickerBuilder,
 
@@ -53,6 +56,7 @@ func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOp
 		picker: base.NewErrPicker(balancer.ErrNoSubConnAvailable),
 		config: bb.config,
 	}
+	return currBalancer
 }
 
 func (*gcpBalancerBuilder) Name() string {

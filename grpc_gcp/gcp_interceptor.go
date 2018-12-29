@@ -91,6 +91,8 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 
 type gcpClientStream struct {
 	sync.Mutex
+	grpc.ClientStream
+
 	cond     *sync.Cond
 	gcpInt   *GCPInterceptor
 	ctx      context.Context
@@ -98,8 +100,7 @@ type gcpClientStream struct {
 	cc       *grpc.ClientConn
 	method   string
 	streamer grpc.Streamer
-	grpc.ClientStream
-	opts []grpc.CallOption
+	opts     []grpc.CallOption
 }
 
 func (cs *gcpClientStream) SendMsg(m interface{}) error {

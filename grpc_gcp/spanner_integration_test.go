@@ -1,6 +1,7 @@
 package grpc_gcp
 
 import (
+	"io"
 	"context"
 	"log"
 	"os"
@@ -103,11 +104,23 @@ func deleteSession(t *testing.T, client spanner.SpannerClient, sessionName strin
 	}
 }
 
+func getSubconnRefs() []*subConnRef {
+	refs := []*subConnRef{}
+	for _, ref := range currBalancer.scRefs {
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
 func TestSessionManagement(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
 	client := spanner.NewSpannerClient(conn)
 	session := createSession(t, client)
+	if len(currBalancer.affinityMap) != 1 {
+		t.Errorf("CreateSession should map an affinity key with a subconn")
+	}
+
 	sessionName := session.GetName()
 
 	getSessionRequest := spanner.GetSessionRequest{
@@ -120,8 +133,15 @@ func TestSessionManagement(t *testing.T) {
 	if getRes.GetName() != sessionName {
 		t.Errorf("GetSession returns different session name: %s, should be: %s", getRes.GetName(), sessionName)
 	}
+	if len(currBalancer.scRefs) != 1 {
+		t.Errorf("GetSession should reuse the same subconn")
+	}
 
 	deleteSession(t, client, sessionName)
+
+	if len(currBalancer.affinityMap) != 0 {
+		t.Errorf("DeleteSession should remove the mapping of affinity and subconn")
+	}
 }
 
 func TestExecuteSql(t *testing.T) {
@@ -129,21 +149,31 @@ func TestExecuteSql(t *testing.T) {
 	defer conn.Close()
 	client := spanner.NewSpannerClient(conn)
 	session := createSession(t, client)
+	if len(currBalancer.affinityMap) != 1 {
+		t.Errorf("CreateSession should map an affinity key with a subconn")
+	}
+
 	sessionName := session.GetName()
 
-	executeSqlReq := spanner.ExecuteSqlRequest{
+	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     TestSQL,
 	}
-	resSet, err := client.ExecuteSql(context.Background(), &executeSqlReq)
+	resSet, err := client.ExecuteSql(context.Background(), &req)
 	if err != nil {
 		t.Fatalf("ExecuteSql failed due to error: %s", err.Error())
 	}
 	if strVal := resSet.GetRows()[0].GetValues()[0].GetStringValue(); strVal != TestColumnData {
 		t.Errorf("ExecuteSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
 	}
+	if len(currBalancer.scRefs) != 1 {
+		t.Errorf("ExecuteSql should reuse the same subconn")
+	}
 
 	deleteSession(t, client, sessionName)
+	if len(currBalancer.affinityMap) != 0 {
+		t.Errorf("DeleteSession should remove the mapping of affinity and subconn")
+	}
 }
 
 func TestOneStream(t *testing.T) {
@@ -153,20 +183,37 @@ func TestOneStream(t *testing.T) {
 	session := createSession(t, client)
 	sessionName := session.GetName()
 
-	executeSqlReq := spanner.ExecuteSqlRequest{
+	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     TestSQL,
 	}
-	stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+	stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 	if err != nil {
 		t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
 	}
+	if len(currBalancer.scRefs) != 1 {
+		t.Errorf("ExecuteStreamingSql should reuse the same subconn")
+	}
+	
+	refs := getSubconnRefs()
+	if refs[0].streamsCnt != 1 {
+		t.Errorf("streamsCnt should be 1 after ExecuteStreamingSql, got %v", refs[0].streamsCnt)
+	}
+
 	partial, err := stream.Recv()
 	if err != nil {
-		t.Fatalf("Receiving streaming results failed due to error :%s", err.Error())
+		t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
+	} else {
+		if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
+			t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+		}
 	}
-	if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
-		t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+	if _, err = stream.Recv(); err != io.EOF {
+		t.Errorf("Expected io.EOF, got %v", err)
+	}
+
+	if refs[0].streamsCnt != 0 {
+		t.Errorf("streamsCnt should be 0 after stream.Recv(), got %v", refs[0].streamsCnt)
 	}
 
 	deleteSession(t, client, sessionName)
@@ -179,17 +226,22 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 	session := createSession(t, client)
 	sessionName := session.GetName()
 
-	executeSqlReq := spanner.ExecuteSqlRequest{
+	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     TestSQL,
 	}
 	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
-	for i := 0; i < 2; i++ {
-		stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+	numStreams := 2
+	for i := 0; i < numStreams; i++ {
+		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 		streams = append(streams, stream)
 		if err != nil {
 			t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
 		}
+	}
+	refs := getSubconnRefs()
+	if refs[0].streamsCnt != uint32(numStreams) {
+		t.Errorf("streamsCnt should be %v, got %v", numStreams, refs[0].streamsCnt)
 	}
 
 	for _, stream := range streams {
@@ -201,6 +253,12 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
 			}
 		}
+		if _, err = stream.Recv(); err != io.EOF {
+			t.Errorf("Expected io.EOF, got %v", err)
+		}
+	}
+	if refs[0].streamsCnt != 0 {
+		t.Errorf("streamsCnt should be 0, got %v", refs[0].streamsCnt)
 	}
 
 	deleteSession(t, client, sessionName)
@@ -212,18 +270,33 @@ func TestMultipleSessions(t *testing.T) {
 	client := spanner.NewSpannerClient(conn)
 	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
 	sessions := []string{}
-	for i := 0; i < 2; i++ {
+
+	numStreams := 2
+	for i := 0; i < numStreams; i++ {
 		session := createSession(t, client)
 		sessionName := session.GetName()
 		sessions = append(sessions, sessionName)
-		executeSqlReq := spanner.ExecuteSqlRequest{
+		req := spanner.ExecuteSqlRequest{
 			Session: sessionName,
 			Sql:     TestSQL,
 		}
-		stream, err := client.ExecuteStreamingSql(context.Background(), &executeSqlReq)
+		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 		streams = append(streams, stream)
 		if err != nil {
-			t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
+			t.Errorf("ExecuteStreamingSql failed due to error: %s", err.Error())
+		}
+	}
+
+	refs := getSubconnRefs()
+	if len(refs) != numStreams {
+		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 1 {
+			t.Errorf("Each subconn should have 1 stream, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 1 {
+			t.Errorf("Each subconn should have 1 affinity, got %v", ref.affinityCnt)
 		}
 	}
 
@@ -236,9 +309,113 @@ func TestMultipleSessions(t *testing.T) {
 				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
 			}
 		}
+		if _, err = stream.Recv(); err != io.EOF {
+			t.Errorf("Expected io.EOF, got %v", err)
+		}
+	}
+
+	if len(refs) != numStreams {
+		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 1 {
+			t.Errorf("Each subconn should have 1 affinity, got %v", ref.affinityCnt)
+		}
 	}
 
 	for _, session := range sessions {
 		deleteSession(t, client, session)
+	}
+	if len(refs) != numStreams {
+		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 0 {
+			t.Errorf("Each subconn should have 0 affinity, got %v", ref.affinityCnt)
+		}
+	}
+}
+
+func TestChannelPoolMaxSize(t *testing.T) {
+	maxSize := 2
+	conn := initClientConn(t, uint32(maxSize), 1)
+	defer conn.Close()
+	client := spanner.NewSpannerClient(conn)
+	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	sessions := []string{}
+
+	for i := 0; i < 2 * maxSize; i++ {
+		session := createSession(t, client)
+		sessionName := session.GetName()
+		sessions = append(sessions, sessionName)
+		req := spanner.ExecuteSqlRequest{
+			Session: sessionName,
+			Sql:     TestSQL,
+		}
+		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
+		streams = append(streams, stream)
+		if err != nil {
+			t.Errorf("ExecuteStreamingSql failed due to error: %s", err.Error())
+		}
+	}
+
+	refs := getSubconnRefs()
+	if len(refs) != maxSize {
+		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 2 {
+			t.Errorf("Each subconn should have 2 streams, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 2 {
+			t.Errorf("Each subconn should have 2 affinity, got %v", ref.affinityCnt)
+		}
+	}
+
+	for _, stream := range streams {
+		partial, err := stream.Recv()
+		if err != nil {
+			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
+		} else {
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			}
+		}
+		if _, err = stream.Recv(); err != io.EOF {
+			t.Errorf("Expected io.EOF, got %v", err)
+		}
+	}
+
+	if len(refs) != maxSize {
+		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 2 {
+			t.Errorf("Each subconn should have 2 affinity, got %v", ref.affinityCnt)
+		}
+	}
+
+	for _, session := range sessions {
+		deleteSession(t, client, session)
+	}
+	if len(refs) != maxSize {
+		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
+	}
+	for _, ref := range refs {
+		if ref.streamsCnt != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		}
+		if ref.affinityCnt != 0 {
+			t.Errorf("Each subconn should have 0 affinity, got %v", ref.affinityCnt)
+		}
 	}
 }
