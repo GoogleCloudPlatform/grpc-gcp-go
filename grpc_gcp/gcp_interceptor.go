@@ -1,10 +1,12 @@
 package grpc_gcp
 
 import (
+	"os"
 	"context"
 	"sync"
 
 	"google.golang.org/grpc"
+	"github.com/golang/protobuf/jsonpb"
 )
 
 type key int
@@ -25,7 +27,7 @@ type GCPInterceptor struct {
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
-func NewGCPInterceptor(config ApiConfig) *GCPInterceptor {
+func NewGCPInterceptor(config *ApiConfig) *GCPInterceptor {
 	mp := make(map[string]AffinityConfig)
 	methodCfgs := config.GetMethod()
 	for _, methodCfg := range methodCfgs {
@@ -104,6 +106,7 @@ type gcpClientStream struct {
 }
 
 func (cs *gcpClientStream) SendMsg(m interface{}) error {
+	// Initialize the underlying client stream when getting the first request message.
 	if cs.ClientStream == nil {
 		affinityCfg, ok := cs.gcpInt.methodToAffinity[cs.method]
 		ctx := cs.ctx
@@ -136,4 +139,15 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 	}
 	cs.Unlock()
 	return cs.ClientStream.RecvMsg(m)
+}
+
+// ParseApiConfig parses a json config file into ApiConfig proto message.
+func ParseApiConfig(path string) (*ApiConfig, error) {
+	jsonFile, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	pb := &ApiConfig{}
+	jsonpb.Unmarshal(jsonFile, pb)
+	return pb, nil
 }

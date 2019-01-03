@@ -25,49 +25,13 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	if err != nil {
 		log.Fatalf("Failed to create credentials: %v", err)
 	}
-	apiConfig := ApiConfig{
-		ChannelPool: &ChannelPoolConfig{
-			MaxSize:                          maxSize,
-			MaxConcurrentStreamsLowWatermark: maxStreams,
-		},
-		Method: []*MethodConfig{
-			&MethodConfig{
-				Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
-				Affinity: &AffinityConfig{
-					Command:     AffinityConfig_BIND,
-					AffinityKey: "name",
-				},
-			},
-			&MethodConfig{
-				Name: []string{"/google.spanner.v1.Spanner/GetSession"},
-				Affinity: &AffinityConfig{
-					Command:     AffinityConfig_BOUND,
-					AffinityKey: "name",
-				},
-			},
-			&MethodConfig{
-				Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
-				Affinity: &AffinityConfig{
-					Command:     AffinityConfig_UNBIND,
-					AffinityKey: "name",
-				},
-			},
-			&MethodConfig{
-				Name: []string{"/google.spanner.v1.Spanner/ExecuteSql"},
-				Affinity: &AffinityConfig{
-					Command:     AffinityConfig_BOUND,
-					AffinityKey: "session",
-				},
-			},
-			&MethodConfig{
-				Name: []string{"/google.spanner.v1.Spanner/ExecuteStreamingSql"},
-				Affinity: &AffinityConfig{
-					Command:     AffinityConfig_BOUND,
-					AffinityKey: "session",
-				},
-			},
-		},
+	apiConfig, err := ParseApiConfig("spanner.grpc.config")
+	if err != nil {
+		log.Fatalf("Failed to parse api config file: %v", err)
 	}
+	apiConfig.GetChannelPool().MaxSize = maxSize
+	apiConfig.GetChannelPool().MaxConcurrentStreamsLowWatermark = maxStreams
+
 	gcpInt := NewGCPInterceptor(apiConfig)
 	conn, err := grpc.Dial(
 		Target,
