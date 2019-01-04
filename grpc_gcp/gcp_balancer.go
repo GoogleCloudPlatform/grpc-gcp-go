@@ -113,6 +113,8 @@ func (cse *connectivityStateEvaluator) recordTransition(oldState, newState conne
 	return connectivity.TransientFailure
 }
 
+// subConnRef keeps reference to the real SubConn with its
+// connectivity state, affinity count and streams count.
 type subConnRef struct {
 	subConn     balancer.SubConn
 	scState     connectivity.State
@@ -128,8 +130,8 @@ type gcpBalancer struct {
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
 
-	affinityMap map[string]*subConnRef
-	scRefs      map[balancer.SubConn]*subConnRef
+	affinityMap map[string]*subConnRef // Maps affinity key to subConnRef object
+	scRefs      map[balancer.SubConn]*subConnRef // Maps SubConn to its subConnRef
 
 	picker balancer.Picker
 	config base.Config
@@ -154,6 +156,7 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 	}
 }
 
+// createNewSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
 func (gb *gcpBalancer) createNewSubConn() {
 	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
 	if err != nil {
@@ -169,6 +172,7 @@ func (gb *gcpBalancer) createNewSubConn() {
 	sc.Connect()
 }
 
+// bindSubConn binds the given affinity key to an existing subConnRef.
 func (gb *gcpBalancer) bindSubConn(bindKey string, scRef *subConnRef) {
 	_, ok := gb.affinityMap[bindKey]
 	if !ok {
@@ -177,6 +181,7 @@ func (gb *gcpBalancer) bindSubConn(bindKey string, scRef *subConnRef) {
 	gb.affinityMap[bindKey].affinityCnt++
 }
 
+// unbindSubConn removes the existing binding associated with the key.
 func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 	boundRef, ok := gb.affinityMap[boundKey]
 	if ok {
@@ -198,7 +203,7 @@ func (gb *gcpBalancer) regeneratePicker() {
 	}
 	readyRefs := []*subConnRef{}
 
-	// Filter out all ready SCs from full subConn map.
+	// Select ready subConns from subConn map.
 	for _, scRef := range gb.scRefs {
 		if scRef.scState == connectivity.Ready {
 			readyRefs = append(readyRefs, scRef)

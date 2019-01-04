@@ -15,15 +15,15 @@ var gcpKey key
 
 type gcpContext struct {
 	affinityCfg    AffinityConfig
-	reqMsg         interface{}
-	replyMsg       interface{}
 	channelPoolCfg *ChannelPoolConfig
+	reqMsg         interface{} // request message used for pre-process of an affinity call
+	replyMsg       interface{} // response message used for post-process of an affinity call
 }
 
 // GCPInterceptor represents the interceptor for GCP specific features
 type GCPInterceptor struct {
 	channelPoolCfg   *ChannelPoolConfig
-	methodToAffinity map[string]AffinityConfig
+	methodToAffinity map[string]AffinityConfig // Maps method path to AffinityConfig
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
@@ -78,6 +78,8 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 	streamer grpc.Streamer,
 	opts ...grpc.CallOption,
 ) (grpc.ClientStream, error) {
+	// This constructor does not create a real ClientStream,
+	// it only stores all parameters and let SendMsg() to create ClientStream.
 	cs := &gcpClientStream{
 		gcpInt:   gcpInt,
 		ctx:      ctx,

@@ -30,7 +30,6 @@ type gcpPicker struct {
 }
 
 func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
-	// TODO: use affinityKey to select subcosn
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
@@ -78,7 +77,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 	scRef.streamsCnt++
 	p.mu.Unlock()
 
-	// define callback for post process
+	// define callback for post process once call is done
 	callback := func(info balancer.DoneInfo) {
 		if info.Err == nil {
 			if hasGcpCtx {
