@@ -35,14 +35,17 @@ var gcpKey key
 type gcpContext struct {
 	affinityCfg    grpc_gcp.AffinityConfig
 	channelPoolCfg *grpc_gcp.ChannelPoolConfig
-	reqMsg         interface{} // request message used for pre-process of an affinity call
-	replyMsg       interface{} // response message used for post-process of an affinity call
+	// request message used for pre-process of an affinity call
+	reqMsg interface{}
+	// response message used for post-process of an affinity call
+	replyMsg interface{}
 }
 
 // GCPInterceptor represents the interceptor for GCP specific features
 type GCPInterceptor struct {
-	channelPoolCfg   *grpc_gcp.ChannelPoolConfig
-	methodToAffinity map[string]grpc_gcp.AffinityConfig // Maps method path to AffinityConfig
+	channelPoolCfg *grpc_gcp.ChannelPoolConfig
+	// Maps method path to AffinityConfig
+	methodToAffinity map[string]grpc_gcp.AffinityConfig
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
@@ -64,7 +67,8 @@ func NewGCPInterceptor(config *grpc_gcp.ApiConfig) *GCPInterceptor {
 	}
 }
 
-// GCPUnaryClientInterceptor intercepts the execution of a unary RPC on the client using grpcgcp extension.
+// GCPUnaryClientInterceptor intercepts the execution of a unary RPC on the
+// client using grpcgcp extension.
 func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 	ctx context.Context,
 	method string,
@@ -88,7 +92,8 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 	return invoker(ctx, method, req, reply, cc, opts...)
 }
 
-// GCPStreamClientInterceptor intercepts the execution of a client streaming RPC using grpcgcp extension.
+// GCPStreamClientInterceptor intercepts the execution of a client streaming RPC
+// using grpcgcp extension.
 func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 	ctx context.Context,
 	desc *grpc.StreamDesc,
@@ -127,7 +132,7 @@ type gcpClientStream struct {
 }
 
 func (cs *gcpClientStream) SendMsg(m interface{}) error {
-	// Initialize the underlying client stream when getting the first request message.
+	// Initialize underlying ClientStream when getting the first request.
 	if cs.ClientStream == nil {
 		affinityCfg, ok := cs.gcpInt.methodToAffinity[cs.method]
 		ctx := cs.ctx

@@ -20,41 +20,51 @@ package grpcgcp
 
 import (
 	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/balancer/base"
+
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
 )
 
-// Name is the name of grpc_gcp balancer.
-const Name = "grpc_gcp"
+const (
+	// Name is the name of grpc_gcp balancer.
+	Name = "grpc_gcp"
 
-// Default settings for max pool size and max concurrent streams.
-const defaultMaxConn = 10
-const defaultMaxStream = 100
+	// Default settings for max pool size and max concurrent streams.
+	defaultMaxConn   = 10
+	defaultMaxStream = 100
+
+	healthCheckEnabled = true
+)
+
+func init() {
+	balancer.Register(newBuilder())
+}
+
+type Config struct {
+	HealthCheck bool
+}
 
 type gcpBalancerBuilder struct {
-	name          string
-	pickerBuilder *gcpPickerBuilder
-	config        base.Config
+	name string
 }
 
 // currBalancer keeps the reference for the currently used balancer, only for testings.
 var currBalancer *gcpBalancer
 
-func (bb *gcpBalancerBuilder) Build(cc balancer.ClientConn, opt balancer.BuildOptions) balancer.Balancer {
+func (bb *gcpBalancerBuilder) Build(
+	cc balancer.ClientConn,
+	opt balancer.BuildOptions,
+) balancer.Balancer {
 	currBalancer = &gcpBalancer{
-		cc:            cc,
-		pickerBuilder: bb.pickerBuilder,
-
+		cc:          cc,
 		affinityMap: make(map[string]*subConnRef),
 		scRefs:      make(map[balancer.SubConn]*subConnRef),
 		csEvltr:     &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
 		// may call UpdateBalancerState with this picker.
-		picker: base.NewErrPicker(balancer.ErrNoSubConnAvailable),
-		config: bb.config,
+		picker: NewErrPicker(balancer.ErrNoSubConnAvailable),
 	}
 	return currBalancer
 }
@@ -63,12 +73,10 @@ func (*gcpBalancerBuilder) Name() string {
 	return Name
 }
 
-// newBuilder creates a new grpc_gcp balancer builder.
+// newBuilder creates a new grpcgcp balancer builder.
 func newBuilder() balancer.Builder {
 	return &gcpBalancerBuilder{
-		name:          Name,
-		pickerBuilder: &gcpPickerBuilder{},
-		config:        base.Config{HealthCheck: true},
+		name: Name,
 	}
 }
 
@@ -89,7 +97,10 @@ type connectivityStateEvaluator struct {
 // closes it is in Shutdown state.
 //
 // recordTransition should only be called synchronously from the same goroutine.
-func (cse *connectivityStateEvaluator) recordTransition(oldState, newState connectivity.State) connectivity.State {
+func (cse *connectivityStateEvaluator) recordTransition(
+	oldState,
+	newState connectivity.State,
+) connectivity.State {
 	// Update counters.
 	for idx, state := range []connectivity.State{oldState, newState} {
 		updateVal := 2*uint64(idx) - 1 // -1 for oldState and +1 for new.
@@ -118,49 +129,53 @@ func (cse *connectivityStateEvaluator) recordTransition(oldState, newState conne
 type subConnRef struct {
 	subConn     balancer.SubConn
 	scState     connectivity.State
-	affinityCnt uint32
-	streamsCnt  uint32
+	affinityCnt uint32 // Keeps track of the number of keys bound to the subConn
+	streamsCnt  uint32 // Keeps track of the number of streams opened on the subConn
 }
 
 type gcpBalancer struct {
-	addrs         []resolver.Address
-	cc            balancer.ClientConn
-	pickerBuilder *gcpPickerBuilder
-
+	addrs   []resolver.Address
+	cc      balancer.ClientConn
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
-
-	affinityMap map[string]*subConnRef           // Maps affinity key to subConnRef object
-	scRefs      map[balancer.SubConn]*subConnRef // Maps SubConn to its subConnRef
-
+	// Maps affinity key to subConnRef object
+	affinityMap map[string]*subConnRef
+	// Maps SubConn to its subConnRef
+	scRefs map[balancer.SubConn]*subConnRef
 	picker balancer.Picker
-	config base.Config
 }
 
 func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
 	if err != nil {
-		grpclog.Infof("grpc_gcp.gcpBalancer: HandleResolvedAddrs called with error %v", err)
+		grpclog.Infof(
+			"grpcgcp.gcpBalancer: HandleResolvedAddrs called with error %v",
+			err,
+		)
 		return
 	}
-	grpclog.Infoln("grpc_gcp.gcpBalancer: got new resolved addresses: ", addrs)
+	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
 	if len(gb.scRefs) == 0 {
-		gb.createNewSubConn()
-	} else {
-		for _, scRef := range gb.scRefs {
-			// TODO(weiranf): update streams count when new addrs resolved?
-			scRef.subConn.UpdateAddresses(addrs)
-			scRef.subConn.Connect()
-		}
+		gb.newSubConn()
+		return
+	}
+
+	for _, scRef := range gb.scRefs {
+		// TODO(weiranf): update streams count when new addrs resolved?
+		scRef.subConn.UpdateAddresses(addrs)
+		scRef.subConn.Connect()
 	}
 }
 
-// createNewSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
-func (gb *gcpBalancer) createNewSubConn() {
-	sc, err := gb.cc.NewSubConn(gb.addrs, balancer.NewSubConnOptions{HealthCheckEnabled: gb.config.HealthCheck})
+// newSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
+func (gb *gcpBalancer) newSubConn() {
+	sc, err := gb.cc.NewSubConn(
+		gb.addrs,
+		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},
+	)
 	if err != nil {
-		grpclog.Errorf("grpc_gcp.gcpBalancer: failed to NewSubConn: %v", err)
+		grpclog.Errorf("grpcgcp.gcpBalancer: failed to NewSubConn: %v", err)
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
@@ -198,7 +213,7 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 //  - built by the pickerBuilder with all READY SubConns otherwise.
 func (gb *gcpBalancer) regeneratePicker() {
 	if gb.state == connectivity.TransientFailure {
-		gb.picker = base.NewErrPicker(balancer.ErrTransientFailure)
+		gb.picker = NewErrPicker(balancer.ErrTransientFailure)
 		return
 	}
 	readyRefs := []*subConnRef{}
@@ -209,14 +224,18 @@ func (gb *gcpBalancer) regeneratePicker() {
 			readyRefs = append(readyRefs, scRef)
 		}
 	}
-	gb.picker = gb.pickerBuilder.Build(readyRefs, gb)
+	gb.picker = newGCPPicker(readyRefs, gb)
 }
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
-	grpclog.Infof("grpc_gcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
+	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 	scRef, ok := gb.scRefs[sc]
 	if !ok {
-		grpclog.Infof("grpc_gcp.gcpBalancer: got state changes for an unknown SubConn: %p, %v", sc, s)
+		grpclog.Infof(
+			"grpcgcp.gcpBalancer: got state changes for an unknown SubConn: %p, %v",
+			sc,
+			s,
+		)
 		return
 	}
 	oldS := scRef.scState
@@ -244,8 +263,4 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 }
 
 func (gb *gcpBalancer) Close() {
-}
-
-func init() {
-	balancer.Register(newBuilder())
 }

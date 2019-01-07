@@ -31,15 +31,17 @@ import (
 	"google.golang.org/grpc/credentials/oauth"
 )
 
-const Target = "spanner.googleapis.com:443"
-const Scope = "https://www.googleapis.com/auth/cloud-platform"
-const Database = "projects/grpc-gcp/instances/sample/databases/benchmark"
-const TestSQL = "select id from storage"
-const TestColumnData = "payload"
+const (
+	target         = "spanner.googleapis.com:443"
+	scope          = "https://www.googleapis.com/auth/cloud-platform"
+	database       = "projects/grpc-gcp/instances/sample/databases/benchmark"
+	testSQL        = "select id from storage"
+	testColumnData = "payload"
+)
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, Scope)
+	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
 	if err != nil {
 		log.Fatalf("Failed to create credentials: %v", err)
 	}
@@ -52,10 +54,10 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 
 	gcpInt := NewGCPInterceptor(apiConfig)
 	conn, err := grpc.Dial(
-		Target,
+		target,
 		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
 		grpc.WithPerRPCCredentials(perRPC),
-		grpc.WithBalancerName("grpc_gcp"),
+		grpc.WithBalancerName(Name),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
 	)
@@ -67,7 +69,7 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 
 func createSession(t *testing.T, client spanner.SpannerClient) *spanner.Session {
 	createSessionRequest := spanner.CreateSessionRequest{
-		Database: Database,
+		Database: database,
 	}
 	session, err := client.CreateSession(context.Background(), &createSessionRequest)
 	if err != nil {
@@ -139,14 +141,14 @@ func TestExecuteSql(t *testing.T) {
 
 	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
-		Sql:     TestSQL,
+		Sql:     testSQL,
 	}
 	resSet, err := client.ExecuteSql(context.Background(), &req)
 	if err != nil {
 		t.Fatalf("ExecuteSql failed due to error: %s", err.Error())
 	}
-	if strVal := resSet.GetRows()[0].GetValues()[0].GetStringValue(); strVal != TestColumnData {
-		t.Errorf("ExecuteSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+	if strVal := resSet.GetRows()[0].GetValues()[0].GetStringValue(); strVal != testColumnData {
+		t.Errorf("ExecuteSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
 	}
 	if len(currBalancer.scRefs) != 1 {
 		t.Errorf("ExecuteSql should reuse the same subconn")
@@ -167,7 +169,7 @@ func TestOneStream(t *testing.T) {
 
 	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
-		Sql:     TestSQL,
+		Sql:     testSQL,
 	}
 	stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 	if err != nil {
@@ -186,8 +188,8 @@ func TestOneStream(t *testing.T) {
 	if err != nil {
 		t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
 	} else {
-		if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
-			t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+		if strVal := partial.GetValues()[0].GetStringValue(); strVal != testColumnData {
+			t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
 		}
 	}
 	if _, err = stream.Recv(); err != io.EOF {
@@ -210,7 +212,7 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 
 	req := spanner.ExecuteSqlRequest{
 		Session: sessionName,
-		Sql:     TestSQL,
+		Sql:     testSQL,
 	}
 	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
 	numStreams := 2
@@ -231,8 +233,8 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 		if err != nil {
 			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
 		} else {
-			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
-				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != testColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
 			}
 		}
 		if _, err = stream.Recv(); err != io.EOF {
@@ -260,7 +262,7 @@ func TestMultipleSessions(t *testing.T) {
 		sessions = append(sessions, sessionName)
 		req := spanner.ExecuteSqlRequest{
 			Session: sessionName,
-			Sql:     TestSQL,
+			Sql:     testSQL,
 		}
 		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 		streams = append(streams, stream)
@@ -287,8 +289,8 @@ func TestMultipleSessions(t *testing.T) {
 		if err != nil {
 			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
 		} else {
-			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
-				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != testColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
 			}
 		}
 		if _, err = stream.Recv(); err != io.EOF {
@@ -338,7 +340,7 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		sessions = append(sessions, sessionName)
 		req := spanner.ExecuteSqlRequest{
 			Session: sessionName,
-			Sql:     TestSQL,
+			Sql:     testSQL,
 		}
 		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
 		streams = append(streams, stream)
@@ -365,8 +367,8 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		if err != nil {
 			t.Errorf("Receiving streaming results failed due to error :%s", err.Error())
 		} else {
-			if strVal := partial.GetValues()[0].GetStringValue(); strVal != TestColumnData {
-				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, TestColumnData)
+			if strVal := partial.GetValues()[0].GetStringValue(); strVal != testColumnData {
+				t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
 			}
 		}
 		if _, err = stream.Recv(); err != io.EOF {

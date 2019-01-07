@@ -31,9 +31,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 )
 
-type gcpPickerBuilder struct{}
-
-func (gpb *gcpPickerBuilder) Build(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
+func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs:      readySCRefs,
@@ -48,7 +46,10 @@ type gcpPicker struct {
 	maxStream   uint32
 }
 
-func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
+func (p *gcpPicker) Pick(
+	ctx context.Context,
+	opts balancer.PickOptions,
+) (balancer.SubConn, func(balancer.DoneInfo), error) {
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
@@ -81,7 +82,8 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
 			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to retrieve affinity key from request message: %v", err)
+				return nil, nil, fmt.Errorf(
+					"failed to retrieve affinity key from request message: %v", err)
 			}
 			boundKey = a
 		}
@@ -143,7 +145,7 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 	if len(p.gcpBalancer.scRefs) < int(p.maxConn) {
 		// Ask balancer to create new subconn when all current subconns are busy and
 		// the number of subconns has not reached maximum.
-		p.gcpBalancer.createNewSubConn()
+		p.gcpBalancer.newSubConn()
 
 		// Let this picker return ErrNoSubConnAvailable because it needs some time
 		// for the subconn to be READY.
@@ -156,9 +158,12 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 	return p.scRefs[0]
 }
 
-// getAffinityKeyFromMessage retrieves the affinity key from proto message using the key locator
-// defined in the affinity config.
-func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey string, err error) {
+// getAffinityKeyFromMessage retrieves the affinity key from proto message using
+// the key locator defined in the affinity config.
+func getAffinityKeyFromMessage(
+	locator string,
+	msg interface{},
+) (affinityKey string, err error) {
 	if locator == "" {
 		return "", fmt.Errorf("affinityKey locator is not valid")
 	}
@@ -176,11 +181,11 @@ func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey str
 			switch valField.Kind() {
 			case reflect.String:
 				ak = valField.String()
-				break
 			case reflect.Interface:
 				val = reflect.ValueOf(valField.Interface())
 			default:
-				return "", fmt.Errorf("field %s in message is neither a string nor another message", titledName)
+				return "",
+					fmt.Errorf("field %s in message is neither a string nor another message", titledName)
 			}
 		}
 	}
@@ -189,4 +194,17 @@ func getAffinityKeyFromMessage(locator string, msg interface{}) (affinityKey str
 	}
 
 	return "", fmt.Errorf("cannot get valid affinity key")
+}
+
+// NewErrPicker returns a picker that always returns err on Pick().
+func NewErrPicker(err error) balancer.Picker {
+	return &errPicker{err: err}
+}
+
+type errPicker struct {
+	err error // Pick() always returns this err.
+}
+
+func (p *errPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
+	return nil, nil, p.err
 }
