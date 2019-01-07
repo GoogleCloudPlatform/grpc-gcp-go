@@ -3,11 +3,9 @@
 
 package grpc_gcp
 
-import (
-	fmt "fmt"
-	proto "github.com/golang/protobuf/proto"
-	math "math"
-)
+import proto "github.com/golang/protobuf/proto"
+import fmt "fmt"
+import math "math"
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
@@ -18,7 +16,7 @@ var _ = math.Inf
 // is compatible with the proto package it is being compiled against.
 // A compilation error at this line likely means your copy of the
 // proto package needs to be updated.
-const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
+const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
 type AffinityConfig_Command int32
 
@@ -44,7 +42,6 @@ var AffinityConfig_Command_name = map[int32]string{
 	1: "BIND",
 	2: "UNBIND",
 }
-
 var AffinityConfig_Command_value = map[string]int32{
 	"BOUND":  0,
 	"BIND":   1,
@@ -54,9 +51,8 @@ var AffinityConfig_Command_value = map[string]int32{
 func (x AffinityConfig_Command) String() string {
 	return proto.EnumName(AffinityConfig_Command_name, int32(x))
 }
-
 func (AffinityConfig_Command) EnumDescriptor() ([]byte, []int) {
-	return fileDescriptor_3492bec32efa6f5d, []int{3, 0}
+	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{3, 0}
 }
 
 type ApiConfig struct {
@@ -73,17 +69,16 @@ func (m *ApiConfig) Reset()         { *m = ApiConfig{} }
 func (m *ApiConfig) String() string { return proto.CompactTextString(m) }
 func (*ApiConfig) ProtoMessage()    {}
 func (*ApiConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3492bec32efa6f5d, []int{0}
+	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{0}
 }
-
 func (m *ApiConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ApiConfig.Unmarshal(m, b)
 }
 func (m *ApiConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ApiConfig.Marshal(b, m, deterministic)
 }
-func (m *ApiConfig) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ApiConfig.Merge(m, src)
+func (dst *ApiConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ApiConfig.Merge(dst, src)
 }
 func (m *ApiConfig) XXX_Size() int {
 	return xxx_messageInfo_ApiConfig.Size(m)
@@ -126,17 +121,16 @@ func (m *ChannelPoolConfig) Reset()         { *m = ChannelPoolConfig{} }
 func (m *ChannelPoolConfig) String() string { return proto.CompactTextString(m) }
 func (*ChannelPoolConfig) ProtoMessage()    {}
 func (*ChannelPoolConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3492bec32efa6f5d, []int{1}
+	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{1}
 }
-
 func (m *ChannelPoolConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ChannelPoolConfig.Unmarshal(m, b)
 }
 func (m *ChannelPoolConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ChannelPoolConfig.Marshal(b, m, deterministic)
 }
-func (m *ChannelPoolConfig) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ChannelPoolConfig.Merge(m, src)
+func (dst *ChannelPoolConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ChannelPoolConfig.Merge(dst, src)
 }
 func (m *ChannelPoolConfig) XXX_Size() int {
 	return xxx_messageInfo_ChannelPoolConfig.Size(m)
@@ -184,17 +178,16 @@ func (m *MethodConfig) Reset()         { *m = MethodConfig{} }
 func (m *MethodConfig) String() string { return proto.CompactTextString(m) }
 func (*MethodConfig) ProtoMessage()    {}
 func (*MethodConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3492bec32efa6f5d, []int{2}
+	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{2}
 }
-
 func (m *MethodConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_MethodConfig.Unmarshal(m, b)
 }
 func (m *MethodConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_MethodConfig.Marshal(b, m, deterministic)
 }
-func (m *MethodConfig) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MethodConfig.Merge(m, src)
+func (dst *MethodConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MethodConfig.Merge(dst, src)
 }
 func (m *MethodConfig) XXX_Size() int {
 	return xxx_messageInfo_MethodConfig.Size(m)
@@ -234,17 +227,16 @@ func (m *AffinityConfig) Reset()         { *m = AffinityConfig{} }
 func (m *AffinityConfig) String() string { return proto.CompactTextString(m) }
 func (*AffinityConfig) ProtoMessage()    {}
 func (*AffinityConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3492bec32efa6f5d, []int{3}
+	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{3}
 }
-
 func (m *AffinityConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_AffinityConfig.Unmarshal(m, b)
 }
 func (m *AffinityConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_AffinityConfig.Marshal(b, m, deterministic)
 }
-func (m *AffinityConfig) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_AffinityConfig.Merge(m, src)
+func (dst *AffinityConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AffinityConfig.Merge(dst, src)
 }
 func (m *AffinityConfig) XXX_Size() int {
 	return xxx_messageInfo_AffinityConfig.Size(m)
@@ -270,16 +262,16 @@ func (m *AffinityConfig) GetAffinityKey() string {
 }
 
 func init() {
-	proto.RegisterEnum("grpc.gcp.AffinityConfig_Command", AffinityConfig_Command_name, AffinityConfig_Command_value)
 	proto.RegisterType((*ApiConfig)(nil), "grpc.gcp.ApiConfig")
 	proto.RegisterType((*ChannelPoolConfig)(nil), "grpc.gcp.ChannelPoolConfig")
 	proto.RegisterType((*MethodConfig)(nil), "grpc.gcp.MethodConfig")
 	proto.RegisterType((*AffinityConfig)(nil), "grpc.gcp.AffinityConfig")
+	proto.RegisterEnum("grpc.gcp.AffinityConfig_Command", AffinityConfig_Command_name, AffinityConfig_Command_value)
 }
 
-func init() { proto.RegisterFile("grpc_gcp.proto", fileDescriptor_3492bec32efa6f5d) }
+func init() { proto.RegisterFile("grpc_gcp.proto", fileDescriptor_grpc_gcp_6523d203f3e2e601) }
 
-var fileDescriptor_3492bec32efa6f5d = []byte{
+var fileDescriptor_grpc_gcp_6523d203f3e2e601 = []byte{
 	// 372 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x52, 0x4d, 0xeb, 0xd3, 0x30,
 	0x18, 0xb7, 0xdb, 0x5c, 0xdb, 0xa7, 0x73, 0xcc, 0x1c, 0xa4, 0xe2, 0xa5, 0x16, 0x0f, 0xc5, 0x43,

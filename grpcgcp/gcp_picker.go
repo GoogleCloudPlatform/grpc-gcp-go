@@ -16,7 +16,7 @@
  *
  */
 
-package grpc_gcp
+package grpcgcp
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
 )
@@ -77,7 +78,7 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 		}
 		locator := affinity.GetAffinityKey()
 		cmd := affinity.GetCommand()
-		if cmd == AffinityConfig_BOUND || cmd == AffinityConfig_UNBIND {
+		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
 			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to retrieve affinity key from request message: %v", err)
@@ -102,12 +103,12 @@ func (p *gcpPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balanc
 				affinity := gcpCtx.affinityCfg
 				locator := affinity.GetAffinityKey()
 				cmd := affinity.GetCommand()
-				if cmd == AffinityConfig_BIND {
+				if cmd == grpc_gcp.AffinityConfig_BIND {
 					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
 					if err == nil {
 						p.gcpBalancer.bindSubConn(bindKey, scRef)
 					}
-				} else if cmd == AffinityConfig_UNBIND {
+				} else if cmd == grpc_gcp.AffinityConfig_UNBIND {
 					p.gcpBalancer.unbindSubConn(boundKey)
 				}
 			}

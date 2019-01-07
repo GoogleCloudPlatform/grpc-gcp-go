@@ -16,11 +16,11 @@
  *
  */
 
-package grpc_gcp
+package grpcgcp
 
 import (
-	"io"
 	"context"
+	"io"
 	"log"
 	"os"
 	"testing"
@@ -43,7 +43,7 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	if err != nil {
 		log.Fatalf("Failed to create credentials: %v", err)
 	}
-	apiConfig, err := ParseApiConfig("spanner.grpc.config")
+	apiConfig, err := ParseAPIConfig("spanner.grpc.config")
 	if err != nil {
 		log.Fatalf("Failed to parse api config file: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestOneStream(t *testing.T) {
 	if len(currBalancer.scRefs) != 1 {
 		t.Errorf("ExecuteStreamingSql should reuse the same subconn")
 	}
-	
+
 	refs := getSubconnRefs()
 	if refs[0].streamsCnt != 1 {
 		t.Errorf("streamsCnt should be 1 after ExecuteStreamingSql, got %v", refs[0].streamsCnt)
@@ -332,7 +332,7 @@ func TestChannelPoolMaxSize(t *testing.T) {
 	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
 	sessions := []string{}
 
-	for i := 0; i < 2 * maxSize; i++ {
+	for i := 0; i < 2*maxSize; i++ {
 		session := createSession(t, client)
 		sessionName := session.GetName()
 		sessions = append(sessions, sessionName)

@@ -16,7 +16,7 @@
  *
  */
 
-package grpc_gcp
+package grpcgcp
 
 import (
 	"google.golang.org/grpc/balancer"
@@ -130,7 +130,7 @@ type gcpBalancer struct {
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
 
-	affinityMap map[string]*subConnRef // Maps affinity key to subConnRef object
+	affinityMap map[string]*subConnRef           // Maps affinity key to subConnRef object
 	scRefs      map[balancer.SubConn]*subConnRef // Maps SubConn to its subConnRef
 
 	picker balancer.Picker

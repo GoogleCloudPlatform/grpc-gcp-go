@@ -16,15 +16,16 @@
  *
  */
 
-package grpc_gcp
+package grpcgcp
 
 import (
-	"os"
 	"context"
+	"os"
 	"sync"
 
-	"google.golang.org/grpc"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"github.com/golang/protobuf/jsonpb"
+	"google.golang.org/grpc"
 )
 
 type key int
@@ -32,21 +33,21 @@ type key int
 var gcpKey key
 
 type gcpContext struct {
-	affinityCfg    AffinityConfig
-	channelPoolCfg *ChannelPoolConfig
+	affinityCfg    grpc_gcp.AffinityConfig
+	channelPoolCfg *grpc_gcp.ChannelPoolConfig
 	reqMsg         interface{} // request message used for pre-process of an affinity call
 	replyMsg       interface{} // response message used for post-process of an affinity call
 }
 
 // GCPInterceptor represents the interceptor for GCP specific features
 type GCPInterceptor struct {
-	channelPoolCfg   *ChannelPoolConfig
-	methodToAffinity map[string]AffinityConfig // Maps method path to AffinityConfig
+	channelPoolCfg   *grpc_gcp.ChannelPoolConfig
+	methodToAffinity map[string]grpc_gcp.AffinityConfig // Maps method path to AffinityConfig
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
-func NewGCPInterceptor(config *ApiConfig) *GCPInterceptor {
-	mp := make(map[string]AffinityConfig)
+func NewGCPInterceptor(config *grpc_gcp.ApiConfig) *GCPInterceptor {
+	mp := make(map[string]grpc_gcp.AffinityConfig)
 	methodCfgs := config.GetMethod()
 	for _, methodCfg := range methodCfgs {
 		methodNames := methodCfg.GetName()
@@ -161,13 +162,13 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 	return cs.ClientStream.RecvMsg(m)
 }
 
-// ParseApiConfig parses a json config file into ApiConfig proto message.
-func ParseApiConfig(path string) (*ApiConfig, error) {
+// ParseAPIConfig parses a json config file into ApiConfig proto message.
+func ParseAPIConfig(path string) (*grpc_gcp.ApiConfig, error) {
 	jsonFile, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	pb := &ApiConfig{}
+	pb := &grpc_gcp.ApiConfig{}
 	jsonpb.Unmarshal(jsonFile, pb)
 	return pb, nil
 }
