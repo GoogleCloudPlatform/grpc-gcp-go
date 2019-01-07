@@ -41,10 +41,6 @@ func init() {
 	balancer.Register(newBuilder())
 }
 
-type Config struct {
-	HealthCheck bool
-}
-
 type gcpBalancerBuilder struct {
 	name string
 }
