@@ -171,29 +171,27 @@ func getAffinityKeyFromMessage(
 	names := strings.Split(locator, ".")
 	val := reflect.ValueOf(msg).Elem()
 
-	var ak string
 	i := 0
+	res := ""
+
 	for ; i < len(names); i++ {
 		name := names[i]
 		titledName := strings.Title(name)
 		valField := val.FieldByName(titledName)
-		if valField.IsValid() {
-			switch valField.Kind() {
-			case reflect.String:
-				ak = valField.String()
-			case reflect.Interface:
-				val = reflect.ValueOf(valField.Interface())
-			default:
-				return "",
-					fmt.Errorf("field %s in message is neither a string nor another message", titledName)
-			}
+		if valField.Kind() == reflect.String {
+			res = valField.String()
+			break
+		} else if valField.Kind() == reflect.Ptr {
+			val = valField.Elem()
+		} else {
+			break
 		}
 	}
-	if i == len(names) {
-		return ak, nil
-	}
 
-	return "", fmt.Errorf("cannot get valid affinity key")
+	if i == len(names) - 1 && res != "" {
+		return res, nil
+	}
+	return "", fmt.Errorf("cannot get valid affinity key from locator: %v", locator)
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().
