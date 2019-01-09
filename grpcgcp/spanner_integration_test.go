@@ -21,7 +21,6 @@ package grpcgcp
 import (
 	"context"
 	"io"
-	"log"
 	"os"
 	"testing"
 
@@ -43,11 +42,11 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
 	if err != nil {
-		log.Fatalf("Failed to create credentials: %v", err)
+		t.Fatalf("Failed to create credentials: %v", err)
 	}
 	apiConfig, err := ParseAPIConfig("spanner.grpc.config")
 	if err != nil {
-		log.Fatalf("Failed to parse api config file: %v", err)
+		t.Fatalf("Failed to parse api config file: %v", err)
 	}
 	apiConfig.GetChannelPool().MaxSize = maxSize
 	apiConfig.GetChannelPool().MaxConcurrentStreamsLowWatermark = maxStreams

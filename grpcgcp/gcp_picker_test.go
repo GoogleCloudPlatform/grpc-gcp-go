@@ -19,8 +19,14 @@
 package grpcgcp
  
 import (
+	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/connectivity"
 	"fmt"
 	"testing"
+	"context"
+	"github.com/golang/mock/gomock"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
 
 type TestMsg struct {
@@ -99,5 +105,106 @@ func TestInvalidKeyLocator(t *testing.T) {
 	_, err = getAffinityKeyFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
 		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+}
+
+func TestPickSubConnWithLeastStreams(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	okSC := mocks.NewMockSubConn(mockCtrl)
+	var scRefs = []*subConnRef{
+		&subConnRef{
+			subConn: mocks.NewMockSubConn(mockCtrl),
+			scState: connectivity.Ready,
+			affinityCnt: 0,
+			streamsCnt:  1,
+		},
+		&subConnRef{
+			subConn: okSC,
+			scState: connectivity.Ready,
+			affinityCnt: 0,
+			streamsCnt:  0,
+		},
+		&subConnRef{
+			subConn: mocks.NewMockSubConn(mockCtrl),
+			scState: connectivity.Ready,
+			affinityCnt: 0,
+			streamsCnt:  3,
+		},
+		&subConnRef{
+			subConn: mocks.NewMockSubConn(mockCtrl),
+			scState: connectivity.Ready,
+			affinityCnt: 0,
+			streamsCnt:  5,
+		},
+	}
+
+	picker := newGCPPicker(scRefs, &gcpBalancer{})
+
+	ctx := context.Background()
+	gcpCtx := &gcpContext{
+		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
+			MaxSize: 10,
+			MaxConcurrentStreamsLowWatermark: 100,
+		},
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	sc, _, err := picker.Pick(ctx, balancer.PickOptions{})
+
+	if err != nil {
+		t.Fatalf("gcpPicker.Pick returns err: %v", err)
+	}
+	if sc != okSC {
+		t.Fatalf("gcpPicker.Pick returns wrong SubConn: %v, want: %v", sc, okSC)
+	}
+}
+
+func TestPickNewSubConn(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockSC := mocks.NewMockSubConn(mockCtrl)
+	var scRefs = []*subConnRef{
+		&subConnRef{
+			subConn: mockSC,
+			scState: connectivity.Ready,
+			affinityCnt: 0,
+			streamsCnt:  100,
+		},
+	}
+
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	newSC := mocks.NewMockSubConn(mockCtrl)
+	newSC.EXPECT().Connect().Times(1)
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).Return(newSC, nil).Times(1)
+
+	mp := make(map[balancer.SubConn]*subConnRef)
+	mp[mockSC] = scRefs[0]
+	b := &gcpBalancer{
+		cc: mockCC,
+		scRefs: mp,
+	}
+
+	picker := newGCPPicker(scRefs, b)
+
+	ctx := context.Background()
+	gcpCtx := &gcpContext{
+		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
+			MaxSize: 10,
+			MaxConcurrentStreamsLowWatermark: 100,
+		},
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	sc, _, err := picker.Pick(ctx, balancer.PickOptions{})
+
+	wantErr := balancer.ErrNoSubConnAvailable
+	if sc != nil || err != wantErr {
+		t.Fatalf("gcpPicker.Pick returns %v, _, %v, want: nil, _, %v", sc, err, wantErr)
+	}
+	if _, ok := b.scRefs[newSC]; !ok {
+		t.Fatalf("Created SubConn is not stored in gcpBalancer.scRefs")
 	}
 }

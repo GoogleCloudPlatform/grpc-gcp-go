@@ -33,7 +33,7 @@ type key int
 var gcpKey key
 
 type gcpContext struct {
-	affinityCfg    grpc_gcp.AffinityConfig
+	affinityCfg    *grpc_gcp.AffinityConfig
 	channelPoolCfg *grpc_gcp.ChannelPoolConfig
 	// request message used for pre-process of an affinity call
 	reqMsg interface{}
@@ -45,19 +45,19 @@ type gcpContext struct {
 type GCPInterceptor struct {
 	channelPoolCfg *grpc_gcp.ChannelPoolConfig
 	// Maps method path to AffinityConfig
-	methodToAffinity map[string]grpc_gcp.AffinityConfig
+	methodToAffinity map[string]*grpc_gcp.AffinityConfig
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
 func NewGCPInterceptor(config *grpc_gcp.ApiConfig) *GCPInterceptor {
-	mp := make(map[string]grpc_gcp.AffinityConfig)
+	mp := make(map[string]*grpc_gcp.AffinityConfig)
 	methodCfgs := config.GetMethod()
 	for _, methodCfg := range methodCfgs {
 		methodNames := methodCfg.GetName()
 		affinityCfg := methodCfg.GetAffinity()
 		if methodNames != nil && affinityCfg != nil {
 			for _, method := range methodNames {
-				mp[method] = *affinityCfg
+				mp[method] = affinityCfg
 			}
 		}
 	}
@@ -78,16 +78,14 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 	invoker grpc.UnaryInvoker,
 	opts ...grpc.CallOption,
 ) error {
-	affinityCfg, ok := gcpInt.methodToAffinity[method]
-	if ok {
-		gcpCtx := &gcpContext{
-			affinityCfg:    affinityCfg,
-			reqMsg:         req,
-			replyMsg:       reply,
-			channelPoolCfg: gcpInt.channelPoolCfg,
-		}
-		ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+	affinityCfg, _ := gcpInt.methodToAffinity[method]
+	gcpCtx := &gcpContext{
+		affinityCfg:    affinityCfg,
+		reqMsg:         req,
+		replyMsg:       reply,
+		channelPoolCfg: gcpInt.channelPoolCfg,
 	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 
 	return invoker(ctx, method, req, reply, cc, opts...)
 }

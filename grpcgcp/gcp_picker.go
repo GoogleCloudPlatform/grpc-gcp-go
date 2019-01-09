@@ -77,15 +77,17 @@ func (p *gcpPicker) Pick(
 				}
 			}
 		}
-		locator := affinity.GetAffinityKey()
-		cmd := affinity.GetCommand()
-		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
-			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"failed to retrieve affinity key from request message: %v", err)
+		if affinity != nil {
+			locator := affinity.GetAffinityKey()
+			cmd := affinity.GetCommand()
+			if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
+				a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"failed to retrieve affinity key from request message: %v", err)
+				}
+				boundKey = a
 			}
-			boundKey = a
 		}
 	}
 
