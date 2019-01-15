@@ -23,7 +23,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
+	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"github.com/golang/protobuf/jsonpb"
 	"google.golang.org/grpc"
 )
@@ -33,8 +33,8 @@ type key int
 var gcpKey key
 
 type gcpContext struct {
-	affinityCfg    *grpc_gcp.AffinityConfig
-	channelPoolCfg *grpc_gcp.ChannelPoolConfig
+	affinityCfg    *pb.AffinityConfig
+	channelPoolCfg *pb.ChannelPoolConfig
 	// request message used for pre-process of an affinity call
 	reqMsg interface{}
 	// response message used for post-process of an affinity call
@@ -43,14 +43,14 @@ type gcpContext struct {
 
 // GCPInterceptor represents the interceptor for GCP specific features
 type GCPInterceptor struct {
-	channelPoolCfg *grpc_gcp.ChannelPoolConfig
+	channelPoolCfg *pb.ChannelPoolConfig
 	// Maps method path to AffinityConfig
-	methodToAffinity map[string]*grpc_gcp.AffinityConfig
+	methodToAffinity map[string]*pb.AffinityConfig
 }
 
 // NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
-func NewGCPInterceptor(config *grpc_gcp.ApiConfig) *GCPInterceptor {
-	mp := make(map[string]*grpc_gcp.AffinityConfig)
+func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
+	mp := make(map[string]*pb.AffinityConfig)
 	methodCfgs := config.GetMethod()
 	for _, methodCfg := range methodCfgs {
 		methodNames := methodCfg.GetName()
@@ -166,12 +166,12 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 }
 
 // ParseAPIConfig parses a json config file into ApiConfig proto message.
-func ParseAPIConfig(path string) (*grpc_gcp.ApiConfig, error) {
+func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
 	jsonFile, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	pb := &grpc_gcp.ApiConfig{}
-	jsonpb.Unmarshal(jsonFile, pb)
-	return pb, nil
+	result := &pb.ApiConfig{}
+	jsonpb.Unmarshal(jsonFile, result)
+	return result, nil
 }

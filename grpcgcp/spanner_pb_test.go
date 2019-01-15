@@ -24,7 +24,7 @@ import (
 	"os"
 	"testing"
 
-	spanner "google.golang.org/genproto/googleapis/spanner/v1"
+	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
@@ -66,8 +66,8 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	return conn
 }
 
-func createSession(t *testing.T, client spanner.SpannerClient) *spanner.Session {
-	createSessionRequest := spanner.CreateSessionRequest{
+func createSession(t *testing.T, client sppb.SpannerClient) *sppb.Session {
+	createSessionRequest := sppb.CreateSessionRequest{
 		Database: database,
 	}
 	session, err := client.CreateSession(context.Background(), &createSessionRequest)
@@ -77,8 +77,8 @@ func createSession(t *testing.T, client spanner.SpannerClient) *spanner.Session 
 	return session
 }
 
-func deleteSession(t *testing.T, client spanner.SpannerClient, sessionName string) {
-	deleteSessionRequest := spanner.DeleteSessionRequest{
+func deleteSession(t *testing.T, client sppb.SpannerClient, sessionName string) {
+	deleteSessionRequest := sppb.DeleteSessionRequest{
 		Name: sessionName,
 	}
 	_, err := client.DeleteSession(context.Background(), &deleteSessionRequest)
@@ -98,7 +98,7 @@ func getSubconnRefs() []*subConnRef {
 func TestSessionManagement(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
+	client := sppb.NewSpannerClient(conn)
 	session := createSession(t, client)
 	if len(currBalancer.affinityMap) != 1 {
 		t.Errorf("CreateSession should map an affinity key with a subconn")
@@ -106,7 +106,7 @@ func TestSessionManagement(t *testing.T) {
 
 	sessionName := session.GetName()
 
-	getSessionRequest := spanner.GetSessionRequest{
+	getSessionRequest := sppb.GetSessionRequest{
 		Name: sessionName,
 	}
 	getRes, err := client.GetSession(context.Background(), &getSessionRequest)
@@ -130,7 +130,7 @@ func TestSessionManagement(t *testing.T) {
 func TestExecuteSql(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
+	client := sppb.NewSpannerClient(conn)
 	session := createSession(t, client)
 	if len(currBalancer.affinityMap) != 1 {
 		t.Errorf("CreateSession should map an affinity key with a subconn")
@@ -138,7 +138,7 @@ func TestExecuteSql(t *testing.T) {
 
 	sessionName := session.GetName()
 
-	req := spanner.ExecuteSqlRequest{
+	req := sppb.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     testSQL,
 	}
@@ -162,11 +162,11 @@ func TestExecuteSql(t *testing.T) {
 func TestOneStream(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
+	client := sppb.NewSpannerClient(conn)
 	session := createSession(t, client)
 	sessionName := session.GetName()
 
-	req := spanner.ExecuteSqlRequest{
+	req := sppb.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     testSQL,
 	}
@@ -205,15 +205,15 @@ func TestOneStream(t *testing.T) {
 func TestMultipleStreamsInSameSession(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
+	client := sppb.NewSpannerClient(conn)
 	session := createSession(t, client)
 	sessionName := session.GetName()
 
-	req := spanner.ExecuteSqlRequest{
+	req := sppb.ExecuteSqlRequest{
 		Session: sessionName,
 		Sql:     testSQL,
 	}
-	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	streams := []sppb.Spanner_ExecuteStreamingSqlClient{}
 	numStreams := 2
 	for i := 0; i < numStreams; i++ {
 		stream, err := client.ExecuteStreamingSql(context.Background(), &req)
@@ -250,8 +250,8 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 func TestMultipleSessions(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
-	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	client := sppb.NewSpannerClient(conn)
+	streams := []sppb.Spanner_ExecuteStreamingSqlClient{}
 	sessions := []string{}
 
 	numStreams := 2
@@ -259,7 +259,7 @@ func TestMultipleSessions(t *testing.T) {
 		session := createSession(t, client)
 		sessionName := session.GetName()
 		sessions = append(sessions, sessionName)
-		req := spanner.ExecuteSqlRequest{
+		req := sppb.ExecuteSqlRequest{
 			Session: sessionName,
 			Sql:     testSQL,
 		}
@@ -329,15 +329,15 @@ func TestChannelPoolMaxSize(t *testing.T) {
 	maxSize := 2
 	conn := initClientConn(t, uint32(maxSize), 1)
 	defer conn.Close()
-	client := spanner.NewSpannerClient(conn)
-	streams := []spanner.Spanner_ExecuteStreamingSqlClient{}
+	client := sppb.NewSpannerClient(conn)
+	streams := []sppb.Spanner_ExecuteStreamingSqlClient{}
 	sessions := []string{}
 
 	for i := 0; i < 2*maxSize; i++ {
 		session := createSession(t, client)
 		sessionName := session.GetName()
 		sessions = append(sessions, sessionName)
-		req := spanner.ExecuteSqlRequest{
+		req := sppb.ExecuteSqlRequest{
 			Session: sessionName,
 			Sql:     testSQL,
 		}
