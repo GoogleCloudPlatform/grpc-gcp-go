@@ -140,8 +140,19 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
 
+	// If the least busy connection still has capacity, use it
 	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < p.maxStream {
 		return p.scRefs[0]
+	}
+
+	// If balancer's total subconns are more than picker's subconns, there are chances
+	// the newly created subconns are still connecting, we can wait on those new subconns.
+	if len(p.scRefs) < len(p.gcpBalancer.scRefs) {
+		for _, ref := range p.gcpBalancer.scRefs {
+			if ref.scState == connectivity.Connecting {
+				return nil
+			}
+		}
 	}
 
 	if len(p.gcpBalancer.scRefs) < int(p.maxConn) {
@@ -157,6 +168,9 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 	if len(p.scRefs) == 0 {
 		return nil
 	}
+
+	// If no capacity for the pool size and every connection reachs the soft limit,
+	// Then picks the least busy one anyway.
 	return p.scRefs[0]
 }
 
@@ -190,7 +204,7 @@ func getAffinityKeyFromMessage(
 		}
 	}
 
-	if i == len(names) - 1 && res != "" {
+	if i == len(names)-1 && res != "" {
 		return res, nil
 	}
 	return "", fmt.Errorf("cannot get valid affinity key from locator: %v", locator)

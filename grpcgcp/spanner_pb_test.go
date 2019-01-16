@@ -22,6 +22,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 	"testing"
 
 	sppb "google.golang.org/genproto/googleapis/spanner/v1"
@@ -127,7 +128,7 @@ func TestSessionManagement(t *testing.T) {
 	}
 }
 
-func TestExecuteSql(t *testing.T) {
+func TestUnaryCall(t *testing.T) {
 	conn := initClientConn(t, 10, 1)
 	defer conn.Close()
 	client := sppb.NewSpannerClient(conn)
@@ -374,7 +375,6 @@ func TestChannelPoolMaxSize(t *testing.T) {
 			t.Errorf("Expected io.EOF, got %v", err)
 		}
 	}
-
 	if len(refs) != maxSize {
 		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
 	}
@@ -400,5 +400,137 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		if ref.affinityCnt != 0 {
 			t.Errorf("Each subconn should have 0 affinity, got %v", ref.affinityCnt)
 		}
+	}
+}
+
+func TestAsyncUnaryCallWithAffinity(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := sppb.NewSpannerClient(conn)
+	session := createSession(t, client)
+	sessionName := session.GetName()
+
+	numThreads := 10
+	wg := sync.WaitGroup{}
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(i int, c sppb.SpannerClient, s string) {
+			defer wg.Done()
+			req := sppb.ExecuteSqlRequest{
+				Session: s,
+				Sql:     testSQL,
+			}
+			resSet, err := c.ExecuteSql(context.Background(), &req)
+			if err != nil {
+				t.Fatalf("ExecuteSql failed due to error: %s", err.Error())
+			}
+			if strVal := resSet.GetRows()[0].GetValues()[0].GetStringValue(); strVal != testColumnData {
+				t.Errorf("ExecuteSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
+			}
+			if len(currBalancer.scRefs) != 1 {
+				t.Errorf("ExecuteSql should reuse the same subconn")
+			}
+		}(i, client, sessionName)
+	}
+	wg.Wait()
+
+	deleteSession(t, client, sessionName)
+	if len(currBalancer.affinityMap) != 0 {
+		t.Errorf("DeleteSession should remove the mapping of affinity and subconn")
+	}
+}
+
+func TestAsyncUnaryCallWithNoAffinity(t *testing.T) {
+	size := 10
+	// Set concurrent streams soft limit to 1
+	conn := initClientConn(t, uint32(size), 1)
+	defer conn.Close()
+	client := sppb.NewSpannerClient(conn)
+
+	numThreads := 5
+	wg := sync.WaitGroup{}
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(i int, c sppb.SpannerClient) {
+			defer wg.Done()
+			req := sppb.ListSessionsRequest{
+				Database: database,
+			}
+			_, err := client.ListSessions(context.Background(), &req)
+			if err != nil {
+				t.Fatalf("ListSessions failed due to error: %s", err.Error())
+			}
+		}(i, client)
+	}
+	wg.Wait()
+
+	if len(currBalancer.scRefs) != numThreads {
+		t.Errorf("concurrent stream should create %v subconns, got %v", numThreads, len(currBalancer.scRefs))
+	}
+
+	// If numThreads are exceeding the pool size, no new subconns should be created
+	numThreads = 2 * size
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(i int, c sppb.SpannerClient) {
+			defer wg.Done()
+			req := sppb.ListSessionsRequest{
+				Database: database,
+			}
+			_, err := client.ListSessions(context.Background(), &req)
+			if err != nil {
+				t.Fatalf("ListSessions failed due to error: %s", err.Error())
+			}
+		}(i, client)
+	}
+	wg.Wait()
+
+	if len(currBalancer.scRefs) != size {
+		t.Errorf("concurrent stream should create %v subconns, got %v", size, len(currBalancer.scRefs))
+	}
+}
+
+func TestAsyncStreamCallWithAffinity(t *testing.T) {
+	conn := initClientConn(t, 10, 1)
+	defer conn.Close()
+	client := sppb.NewSpannerClient(conn)
+	session := createSession(t, client)
+	sessionName := session.GetName()
+
+	numThreads := 10
+	wg := sync.WaitGroup{}
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(i int, c sppb.SpannerClient, s string) {
+			defer wg.Done()
+			req := sppb.ExecuteSqlRequest{
+				Session: s,
+				Sql:     testSQL,
+			}
+			stream, err := c.ExecuteStreamingSql(context.Background(), &req)
+			if err != nil {
+				t.Fatalf("ExecuteStreamingSql failed due to error: %s", err.Error())
+			}
+			for {
+				partial, err := stream.Recv()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatalf("stream.Recv failed with %v", err)
+				}
+				if strVal := partial.GetValues()[0].GetStringValue(); strVal != testColumnData {
+					t.Errorf("ExecuteStreamingSql return incorrect string value: %s, should be: %s", strVal, testColumnData)
+				}
+			}
+			if len(currBalancer.scRefs) != 1 {
+				t.Errorf("ExecuteStreamingSql should reuse the same subconn")
+			}
+		}(i, client, sessionName)
+	}
+	wg.Wait()
+
+	deleteSession(t, client, sessionName)
+	if len(currBalancer.affinityMap) != 0 {
+		t.Errorf("DeleteSession should remove the mapping of affinity and subconn")
 	}
 }
