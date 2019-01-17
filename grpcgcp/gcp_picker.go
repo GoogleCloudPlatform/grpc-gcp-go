@@ -28,7 +28,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/connectivity"
 )
 
 func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
@@ -53,6 +52,9 @@ func (p *gcpPicker) Pick(
 	if len(p.scRefs) <= 0 {
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
@@ -91,14 +93,11 @@ func (p *gcpPicker) Pick(
 		}
 	}
 
-	p.mu.Lock()
 	scRef := p.getSubConnRef(boundKey)
 	if scRef == nil {
-		p.mu.Unlock()
 		return nil, nil, balancer.ErrNoSubConnAvailable
 	}
-	scRef.streamsCnt++
-	p.mu.Unlock()
+	scRef.streamsIncr()
 
 	// define callback for post process once call is done
 	callback := func(info balancer.DoneInfo) {
@@ -110,14 +109,14 @@ func (p *gcpPicker) Pick(
 				if cmd == grpc_gcp.AffinityConfig_BIND {
 					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
 					if err == nil {
-						p.gcpBalancer.bindSubConn(bindKey, scRef)
+						p.gcpBalancer.bindSubConn(bindKey, scRef.subConn)
 					}
 				} else if cmd == grpc_gcp.AffinityConfig_UNBIND {
 					p.gcpBalancer.unbindSubConn(boundKey)
 				}
 			}
 		}
-		scRef.streamsCnt--
+		scRef.streamsDecr()
 	}
 	return scRef.subConn, callback, nil
 }
@@ -126,12 +125,7 @@ func (p *gcpPicker) Pick(
 // ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 	if boundKey != "" {
-		if ref, ok := p.gcpBalancer.affinityMap[boundKey]; ok {
-			if ref.scState != connectivity.Ready {
-				// It's possible that the bound subconn is not in the readySubConns list,
-				// If it's not ready yet, we throw ErrNoSubConnAvailable
-				return nil
-			}
+		if ref, ok := p.gcpBalancer.getReadySubConnRef(boundKey); ok {
 			return ref
 		}
 	}
@@ -141,18 +135,8 @@ func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
 	})
 
 	// If the least busy connection still has capacity, use it
-	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < p.maxStream {
+	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < int32(p.maxStream) {
 		return p.scRefs[0]
-	}
-
-	// If balancer's total subconns are more than picker's subconns, there are chances
-	// the newly created subconns are still connecting, we can wait on those new subconns.
-	if len(p.scRefs) < len(p.gcpBalancer.scRefs) {
-		for _, ref := range p.gcpBalancer.scRefs {
-			if ref.scState == connectivity.Connecting {
-				return nil
-			}
-		}
 	}
 
 	if len(p.gcpBalancer.scRefs) < int(p.maxConn) {

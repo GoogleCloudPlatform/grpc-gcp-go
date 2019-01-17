@@ -20,19 +20,21 @@ package grpcgcp_test
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"testing"
 
 	"cloud.google.com/go/spanner"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 )
 
 const (
 	database       = "projects/grpc-gcp/instances/sample/databases/benchmark"
+	tableName      = "storage"
+	column         = "id"
 	testSQL        = "select id from storage"
 	testColumnData = "payload"
 )
@@ -58,7 +60,25 @@ func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
 	return client
 }
 
-func TestSimpleRead(t *testing.T) {
+func TestReadRow(t *testing.T) {
+	ctx := context.Background()
+	client := initSpannerClient(t, ctx)
+	defer client.Close()
+
+	r, err := client.Single().ReadRow(ctx, tableName, spanner.Key{testColumnData}, []string{column})
+	if err != nil {
+		t.Fatalf("ReadRow failed with %v", err)
+	}
+	var data string
+	if err := r.Column(0, &data); err != nil {
+		t.Fatalf("Failed to read column from row with %v", err)
+	}
+	if data != testColumnData {
+		t.Fatalf("Got incorrect column data %v, want %v", data, testColumnData)
+	}
+}
+
+func TestReadRowIterator(t *testing.T) {
 	ctx := context.Background()
 	client := initSpannerClient(t, ctx)
 	defer client.Close()
@@ -83,43 +103,78 @@ func TestSimpleRead(t *testing.T) {
 
 func TestParallelRead(t *testing.T) {
 	ctx := context.Background()
-	// client := initSpannerClient(t, ctx)
-	client, err := spanner.NewClient(ctx, database)
+	client := initSpannerClient(t, ctx)
 	defer client.Close()
 
-	txn, err := client.BatchReadOnlyTransaction(ctx, spanner.StrongRead())
-	if err != nil {
-		t.Fatalf("Failed to get BatchReadOnlyTransaction with %v", err)
-	}
-	defer txn.Close()
-	defer txn.Cleanup(ctx)
-
 	stmt := spanner.Statement{SQL: testSQL}
-	partitions, err := txn.PartitionQuery(ctx, stmt, spanner.PartitionOptions{})
+	numThreads := 10
+	wg := sync.WaitGroup{}
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(i int, c *spanner.Client) {
+			defer wg.Done()
+			iter := c.Single().Query(ctx, stmt)
+			defer iter.Stop()
+
+			row, err := iter.Next()
+			if err != nil {
+				t.Fatalf("Query failed with %v", err)
+			}
+
+			var data string
+			if err := row.Columns(&data); err != nil {
+				t.Fatalf("Failed to parse row with %v", err)
+			}
+			if data != testColumnData {
+				t.Fatalf("Got incorrect column data %v, want %v", data, testColumnData)
+			}
+		}(i, client)
+	}
+	wg.Wait()
+}
+
+func TestMutations(t *testing.T) {
+	ctx := context.Background()
+	client := initSpannerClient(t, ctx)
+	defer client.Close()
+
+	inserted := "inserted-data"
+	_, err := client.Apply(ctx, []*spanner.Mutation{
+		spanner.Insert(tableName, []string{column}, []interface{}{inserted}),
+	})
 	if err != nil {
-		t.Fatalf("PartitionQuery failed with %v", err)
+		t.Fatalf("Insert row failed with %v", err)
 	}
 
+	_, err = client.Apply(ctx, []*spanner.Mutation{
+		spanner.Delete(tableName, spanner.Key{inserted}),
+	})
+	if err != nil {
+		t.Fatalf("Delete row failed with %v", err)
+	}
+}
+
+func TestParallelMutations(t *testing.T) {
+	ctx := context.Background()
+	client := initSpannerClient(t, ctx)
+	// client, _ := spanner.NewClient(ctx, database)
+	defer client.Close()
+
+	numThreads := 10
 	wg := sync.WaitGroup{}
-	for i, p := range partitions {
+	for i := 0; i < numThreads; i++ {
 		wg.Add(1)
-		go func(i int, p *spanner.Partition) {
+		go func(i int, c *spanner.Client) {
 			defer wg.Done()
-			iter := txn.Execute(ctx, p)
-			defer iter.Stop()
-			for {
-				row, err := iter.Next()
-				if err == iterator.Done {
-					break
-				} else if err != nil {
-					t.Fatalf("iter.Next failed with %v", err)
-				}
-				var data string
-				if err := row.Columns(&data); err != nil {
-					t.Fatalf("Failed to parse row with %v", err)
-				}
+			inserted := fmt.Sprintf("inserted-%d", i)
+			_, err := c.Apply(ctx, []*spanner.Mutation{
+				spanner.Insert(tableName, []string{column}, []interface{}{inserted}),
+				spanner.Delete(tableName, spanner.Key{inserted}),
+			})
+			if err != nil {
+				t.Fatalf("Insert row failed with %v", err)
 			}
-		}(i, p)
+		}(i, client)
 	}
 	wg.Wait()
 }

@@ -19,6 +19,9 @@
 package grpcgcp
 
 import (
+	"sync"
+	"sync/atomic"
+
 	"google.golang.org/grpc/balancer"
 
 	"google.golang.org/grpc/connectivity"
@@ -54,8 +57,10 @@ func (bb *gcpBalancerBuilder) Build(
 ) balancer.Balancer {
 	currBalancer = &gcpBalancer{
 		cc:          cc,
-		affinityMap: make(map[string]*subConnRef),
+		mu:          sync.Mutex{},
+		affinityMap: make(map[string]balancer.SubConn),
 		scRefs:      make(map[balancer.SubConn]*subConnRef),
+		scStates:    make(map[balancer.SubConn]connectivity.State),
 		csEvltr:     &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
@@ -124,9 +129,24 @@ func (cse *connectivityStateEvaluator) recordTransition(
 // connectivity state, affinity count and streams count.
 type subConnRef struct {
 	subConn     balancer.SubConn
-	scState     connectivity.State
-	affinityCnt uint32 // Keeps track of the number of keys bound to the subConn
-	streamsCnt  uint32 // Keeps track of the number of streams opened on the subConn
+	affinityCnt int32 // Keeps track of the number of keys bound to the subConn
+	streamsCnt  int32 // Keeps track of the number of streams opened on the subConn
+}
+
+func (ref *subConnRef) affinityIncr() {
+	atomic.AddInt32(&ref.affinityCnt, 1)
+}
+
+func (ref *subConnRef) affinityDecr() {
+	atomic.AddInt32(&ref.affinityCnt, -1)
+}
+
+func (ref *subConnRef) streamsIncr() {
+	atomic.AddInt32(&ref.streamsCnt, 1)
+}
+
+func (ref *subConnRef) streamsDecr() {
+	atomic.AddInt32(&ref.streamsCnt, -1)
 }
 
 type gcpBalancer struct {
@@ -134,10 +154,12 @@ type gcpBalancer struct {
 	cc      balancer.ClientConn
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
-	// Maps affinity key to subConnRef object
-	affinityMap map[string]*subConnRef
-	// Maps SubConn to its subConnRef
-	scRefs map[balancer.SubConn]*subConnRef
+	mu      sync.Mutex
+
+	affinityMap map[string]balancer.SubConn             // Maps affinity key to SubConn
+	scRefs      map[balancer.SubConn]*subConnRef        // Maps SubConn to its subConnRef
+	scStates    map[balancer.SubConn]connectivity.State // Maps SubConn to its connectivity state
+
 	picker balancer.Picker
 }
 
@@ -166,6 +188,17 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 
 // newSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
 func (gb *gcpBalancer) newSubConn() {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+
+	// there are chances the newly created subconns are still connecting,
+	// we can wait on those new subconns.
+	for _, scState := range gb.scStates {
+		if scState == connectivity.Connecting {
+			return
+		}
+	}
+
 	sc, err := gb.cc.NewSubConn(
 		gb.addrs,
 		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},
@@ -175,29 +208,49 @@ func (gb *gcpBalancer) newSubConn() {
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
-		subConn:     sc,
-		scState:     connectivity.Idle,
-		streamsCnt:  0,
-		affinityCnt: 0,
+		subConn: sc,
 	}
+	gb.scStates[sc] = connectivity.Idle
 	sc.Connect()
 }
 
+// getReadySubConnRef returns a subConnRef and a bool. The bool indicates whether
+// the boundKey exists in the affinityMap. If returned subConnRef is a nil, it
+// means the underlying subconn is not READY yet.
+func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+
+	if sc, ok := gb.affinityMap[boundKey]; ok {
+		if gb.scStates[sc] != connectivity.Ready {
+			// It's possible that the bound subconn is not in the readySubConns list,
+			// If it's not ready yet, we throw ErrNoSubConnAvailable
+			return nil, true
+		}
+		return gb.scRefs[sc], true
+	}
+	return nil, false
+}
+
 // bindSubConn binds the given affinity key to an existing subConnRef.
-func (gb *gcpBalancer) bindSubConn(bindKey string, scRef *subConnRef) {
+func (gb *gcpBalancer) bindSubConn(bindKey string, sc balancer.SubConn) {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
 	_, ok := gb.affinityMap[bindKey]
 	if !ok {
-		gb.affinityMap[bindKey] = scRef
+		gb.affinityMap[bindKey] = sc
 	}
-	gb.affinityMap[bindKey].affinityCnt++
+	gb.scRefs[sc].affinityIncr()
 }
 
 // unbindSubConn removes the existing binding associated with the key.
 func (gb *gcpBalancer) unbindSubConn(boundKey string) {
-	boundRef, ok := gb.affinityMap[boundKey]
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+	boundSC, ok := gb.affinityMap[boundKey]
 	if ok {
-		boundRef.affinityCnt--
-		if boundRef.affinityCnt <= 0 {
+		gb.scRefs[boundSC].affinityDecr()
+		if gb.scRefs[boundSC].affinityCnt <= 0 {
 			delete(gb.affinityMap, boundKey)
 		}
 	}
@@ -215,9 +268,9 @@ func (gb *gcpBalancer) regeneratePicker() {
 	readyRefs := []*subConnRef{}
 
 	// Select ready subConns from subConn map.
-	for _, scRef := range gb.scRefs {
-		if scRef.scState == connectivity.Ready {
-			readyRefs = append(readyRefs, scRef)
+	for sc, scState := range gb.scStates {
+		if scState == connectivity.Ready {
+			readyRefs = append(readyRefs, gb.scRefs[sc])
 		}
 	}
 	gb.picker = newGCPPicker(readyRefs, gb)
@@ -225,23 +278,27 @@ func (gb *gcpBalancer) regeneratePicker() {
 
 func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
-	scRef, ok := gb.scRefs[sc]
+
+	gb.mu.Lock()
+	oldS, ok := gb.scStates[sc]
 	if !ok {
 		grpclog.Infof(
 			"grpcgcp.gcpBalancer: got state changes for an unknown SubConn: %p, %v",
 			sc,
 			s,
 		)
+		gb.mu.Unlock()
 		return
 	}
-	oldS := scRef.scState
-	scRef.scState = s
+	gb.scStates[sc] = s
 	switch s {
 	case connectivity.Idle:
 		sc.Connect()
 	case connectivity.Shutdown:
 		delete(gb.scRefs, sc)
+		delete(gb.scStates, sc)
 	}
+	gb.mu.Unlock()
 
 	oldAggrState := gb.state
 	gb.state = gb.csEvltr.recordTransition(oldS, s)

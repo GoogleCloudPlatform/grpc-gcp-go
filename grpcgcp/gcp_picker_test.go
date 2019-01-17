@@ -17,20 +17,21 @@
  */
 
 package grpcgcp
- 
+
 import (
-	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/connectivity"
+	"context"
 	"fmt"
 	"testing"
-	"context"
-	"github.com/golang/mock/gomock"
-	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
+
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
+	"github.com/golang/mock/gomock"
+	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/connectivity"
 )
 
 type TestMsg struct {
-	Key string
+	Key         string
 	NestedField *NestedField
 }
 
@@ -115,26 +116,22 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 	okSC := mocks.NewMockSubConn(mockCtrl)
 	var scRefs = []*subConnRef{
 		&subConnRef{
-			subConn: mocks.NewMockSubConn(mockCtrl),
-			scState: connectivity.Ready,
+			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  1,
 		},
 		&subConnRef{
-			subConn: okSC,
-			scState: connectivity.Ready,
+			subConn:     okSC,
 			affinityCnt: 0,
 			streamsCnt:  0,
 		},
 		&subConnRef{
-			subConn: mocks.NewMockSubConn(mockCtrl),
-			scState: connectivity.Ready,
+			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  3,
 		},
 		&subConnRef{
-			subConn: mocks.NewMockSubConn(mockCtrl),
-			scState: connectivity.Ready,
+			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  5,
 		},
@@ -145,7 +142,7 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 	ctx := context.Background()
 	gcpCtx := &gcpContext{
 		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
-			MaxSize: 10,
+			MaxSize:                          10,
 			MaxConcurrentStreamsLowWatermark: 100,
 		},
 	}
@@ -168,8 +165,7 @@ func TestPickNewSubConn(t *testing.T) {
 	mockSC := mocks.NewMockSubConn(mockCtrl)
 	var scRefs = []*subConnRef{
 		&subConnRef{
-			subConn: mockSC,
-			scState: connectivity.Ready,
+			subConn:     mockSC,
 			affinityCnt: 0,
 			streamsCnt:  100,
 		},
@@ -183,8 +179,9 @@ func TestPickNewSubConn(t *testing.T) {
 	mp := make(map[balancer.SubConn]*subConnRef)
 	mp[mockSC] = scRefs[0]
 	b := &gcpBalancer{
-		cc: mockCC,
-		scRefs: mp,
+		cc:       mockCC,
+		scRefs:   mp,
+		scStates: make(map[balancer.SubConn]connectivity.State),
 	}
 
 	picker := newGCPPicker(scRefs, b)
@@ -192,7 +189,7 @@ func TestPickNewSubConn(t *testing.T) {
 	ctx := context.Background()
 	gcpCtx := &gcpContext{
 		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
-			MaxSize: 10,
+			MaxSize:                          10,
 			MaxConcurrentStreamsLowWatermark: 100,
 		},
 	}

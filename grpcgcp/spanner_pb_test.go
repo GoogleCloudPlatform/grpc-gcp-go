@@ -224,7 +224,7 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 		}
 	}
 	refs := getSubconnRefs()
-	if refs[0].streamsCnt != uint32(numStreams) {
+	if refs[0].streamsCnt != int32(numStreams) {
 		t.Errorf("streamsCnt should be %v, got %v", numStreams, refs[0].streamsCnt)
 	}
 
