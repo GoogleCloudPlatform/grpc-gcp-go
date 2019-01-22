@@ -21,7 +21,6 @@ package grpcgcp_test
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"testing"
 
@@ -40,7 +39,6 @@ const (
 )
 
 func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
-
 	apiConfig, err := grpcgcp.ParseAPIConfig("spanner.grpc.config")
 	if err != nil {
 		t.Fatalf("Failed to parse api config file: %v", err)
@@ -55,7 +53,7 @@ func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
 	// We should set it to 1 since we are using one clientconn with pool of subconns.
 	client, err := spanner.NewClientWithConfig(ctx, database, spanner.ClientConfig{NumChannels: 1}, opts...)
 	if err != nil {
-		log.Fatalf("Failed to create client %v", err)
+		t.Fatalf("Failed to create client %v", err)
 	}
 	return client
 }
@@ -157,7 +155,6 @@ func TestMutations(t *testing.T) {
 func TestParallelMutations(t *testing.T) {
 	ctx := context.Background()
 	client := initSpannerClient(t, ctx)
-	// client, _ := spanner.NewClient(ctx, database)
 	defer client.Close()
 
 	numThreads := 10

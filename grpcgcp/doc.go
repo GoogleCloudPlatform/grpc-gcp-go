@@ -21,9 +21,7 @@ Package grpcgcp provides grpc supports for Google Cloud APIs.
 
 Usage:
 
-Let's use Spanner API as an example.
-
-1. First, Create a json file defining API configuration, with ChannelPoolConfig and MethodConfig.
+1. First, create some_api_config.json file defining API configuration:
 
 	{
 		"channelPool": {
@@ -32,24 +30,24 @@ Let's use Spanner API as an example.
 		},
 		"method": [
 			{
-				"name": [ "/google.spanner.v1.Spanner/CreateSession" ],
+				"name": [ "/some.api.v1/Method1" ],
 				"affinity": {
 					"command": "BIND",
-					"affinityKey": "name"
+					"affinityKey": "key1"
 				}
 			},
 			{
-				"name": [ "/google.spanner.v1.Spanner/GetSession" ],
+				"name": [ "/some.api.v1/Method2" ],
 				"affinity": {
 					"command": "BOUND",
-					"affinityKey": "name"
+					"affinityKey": "key2"
 				}
 			},
 			{
-				"name": [ "/google.spanner.v1.Spanner/DeleteSession" ],
+				"name": [ "/some.api.v1/Method3" ],
 				"affinity": {
 					"command": "UNBIND",
-					"affinityKey": "name"
+					"affinityKey": "key3"
 				}
 			}
 		]
@@ -57,19 +55,16 @@ Let's use Spanner API as an example.
 
 2. Load configuration to ApiConfig.
 
-	apiConfig, err := grpcgcp.ParseAPIConfig("some_config.json")
+	apiConfig, err := grpcgcp.ParseAPIConfig("some_api_config.json")
 
 3. Initialize GCPInterceptor.
 
 	gcpInt := grpcgcp.NewGCPInterceptor(apiConfig)
 
-4. Make ClientConn with specific DialOptions.
+4. Make ClientConn with specific DialOptions to enable grpc_gcp load balancer.
 
 	conn, err := grpc.Dial(
 		target,
-		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
-		grpc.WithPerRPCCredentials(perRPC),
-		
 		// Following are channel management options:
 		grpc.WithBalancerName("grpc_gcp"),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
