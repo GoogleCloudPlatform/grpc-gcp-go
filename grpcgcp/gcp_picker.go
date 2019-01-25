@@ -39,10 +39,11 @@ func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 
 type gcpPicker struct {
 	gcpBalancer *gcpBalancer
-	scRefs      []*subConnRef
-	mu          sync.Mutex
-	maxConn     uint32
-	maxStream   uint32
+
+	mu        sync.Mutex
+	scRefs    []*subConnRef
+	maxConn   uint32
+	maxStream uint32
 }
 
 func (p *gcpPicker) Pick(
@@ -93,9 +94,9 @@ func (p *gcpPicker) Pick(
 		}
 	}
 
-	scRef := p.getSubConnRef(boundKey)
-	if scRef == nil {
-		return nil, nil, balancer.ErrNoSubConnAvailable
+	scRef, err := p.getSubConnRef(boundKey)
+	if err != nil {
+		return nil, nil, err
 	}
 	scRef.streamsIncr()
 
@@ -123,39 +124,39 @@ func (p *gcpPicker) Pick(
 
 // getSubConnRef returns the subConnRef object that contains the subconn
 // ready to be used by picker.
-func (p *gcpPicker) getSubConnRef(boundKey string) *subConnRef {
+func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	if boundKey != "" {
 		if ref, ok := p.gcpBalancer.getReadySubConnRef(boundKey); ok {
-			return ref
+			return ref, nil
 		}
 	}
 
-	sort.Slice(p.scRefs[:], func(i, j int) bool {
+	sort.Slice(p.scRefs, func(i, j int) bool {
 		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
 	})
 
 	// If the least busy connection still has capacity, use it
 	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < int32(p.maxStream) {
-		return p.scRefs[0]
+		return p.scRefs[0], nil
 	}
 
-	if len(p.gcpBalancer.scRefs) < int(p.maxConn) {
+	if p.gcpBalancer.getConnectionPoolSize() < int(p.maxConn) {
 		// Ask balancer to create new subconn when all current subconns are busy and
 		// the number of subconns has not reached maximum.
 		p.gcpBalancer.newSubConn()
 
 		// Let this picker return ErrNoSubConnAvailable because it needs some time
 		// for the subconn to be READY.
-		return nil
+		return nil, balancer.ErrNoSubConnAvailable
 	}
 
 	if len(p.scRefs) == 0 {
-		return nil
+		return nil, balancer.ErrNoSubConnAvailable
 	}
 
 	// If no capacity for the pool size and every connection reachs the soft limit,
 	// Then picks the least busy one anyway.
-	return p.scRefs[0]
+	return p.scRefs[0], nil
 }
 
 // getAffinityKeyFromMessage retrieves the affinity key from proto message using
@@ -195,7 +196,7 @@ func getAffinityKeyFromMessage(
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().
-func NewErrPicker(err error) balancer.Picker {
+func newErrPicker(err error) balancer.Picker {
 	return &errPicker{err: err}
 }
 

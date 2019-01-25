@@ -27,6 +27,7 @@ import (
 
 	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 )
@@ -38,6 +39,27 @@ const (
 	testSQL        = "select id from storage"
 	testColumnData = "payload"
 )
+
+var currBalancer *gcpBalancer
+
+// testBuilderWrapper wraps the real gcpBalancerBuilder
+// so it can cache the created balancer object
+type testBuilderWrapper struct {
+	name        string
+	realBuilder *gcpBalancerBuilder
+}
+
+func (tb *testBuilderWrapper) Build(
+	cc balancer.ClientConn,
+	opt balancer.BuildOptions,
+) balancer.Balancer {
+	currBalancer = tb.realBuilder.Build(cc, opt).(*gcpBalancer)
+	return currBalancer
+}
+
+func (*testBuilderWrapper) Name() string {
+	return Name
+}
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -51,6 +73,12 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	}
 	apiConfig.GetChannelPool().MaxSize = maxSize
 	apiConfig.GetChannelPool().MaxConcurrentStreamsLowWatermark = maxStreams
+
+	// Register test builder wrapper
+	balancer.Register(&testBuilderWrapper{
+		name:        Name,
+		realBuilder: &gcpBalancerBuilder{name: Name},
+	})
 
 	gcpInt := NewGCPInterceptor(apiConfig)
 	conn, err := grpc.Dial(

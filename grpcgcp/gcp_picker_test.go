@@ -30,24 +30,24 @@ import (
 	"google.golang.org/grpc/connectivity"
 )
 
-type TestMsg struct {
+type testMsg struct {
 	Key         string
-	NestedField *NestedField
+	NestedField *nestedField
 }
 
-type NestedField struct {
+type nestedField struct {
 	Key string
 }
 
-func (nested *NestedField) getNestedKey() string {
+func (nested *nestedField) getNestedKey() string {
 	return nested.Key
 }
 
 func TestGetKeyFromMessage(t *testing.T) {
 	expectedRes := "test_key"
-	msg := &TestMsg{
+	msg := &testMsg{
 		Key: expectedRes,
-		NestedField: &NestedField{
+		NestedField: &nestedField{
 			Key: "test_nested_key",
 		},
 	}
@@ -63,9 +63,9 @@ func TestGetKeyFromMessage(t *testing.T) {
 
 func TestGetNestedKeyFromMessage(t *testing.T) {
 	expectedRes := "test_nested_key"
-	msg := &TestMsg{
+	msg := &testMsg{
 		Key: "test_key",
-		NestedField: &NestedField{
+		NestedField: &nestedField{
 			Key: expectedRes,
 		},
 	}
@@ -80,9 +80,9 @@ func TestGetNestedKeyFromMessage(t *testing.T) {
 }
 
 func TestInvalidKeyLocator(t *testing.T) {
-	msg := &TestMsg{
+	msg := &testMsg{
 		Key: "test_key",
-		NestedField: &NestedField{
+		NestedField: &nestedField{
 			Key: "test_nested_key",
 		},
 	}

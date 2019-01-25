@@ -48,26 +48,21 @@ type gcpBalancerBuilder struct {
 	name string
 }
 
-// currBalancer keeps the reference for the currently used balancer, only for testings.
-var currBalancer *gcpBalancer
-
 func (bb *gcpBalancerBuilder) Build(
 	cc balancer.ClientConn,
 	opt balancer.BuildOptions,
 ) balancer.Balancer {
-	currBalancer = &gcpBalancer{
+	return &gcpBalancer{
 		cc:          cc,
-		mu:          sync.Mutex{},
 		affinityMap: make(map[string]balancer.SubConn),
 		scRefs:      make(map[balancer.SubConn]*subConnRef),
 		scStates:    make(map[balancer.SubConn]connectivity.State),
-		csEvltr:     &connectivityStateEvaluator{},
+		csEvltr:     &ConnectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
 		// may call UpdateBalancerState with this picker.
-		picker: NewErrPicker(balancer.ErrNoSubConnAvailable),
+		picker: newErrPicker(balancer.ErrNoSubConnAvailable),
 	}
-	return currBalancer
 }
 
 func (*gcpBalancerBuilder) Name() string {
@@ -81,16 +76,16 @@ func newBuilder() balancer.Builder {
 	}
 }
 
-// connectivityStateEvaluator gets updated by addrConns when their
+// ConnectivityStateEvaluator gets updated by addrConns when their
 // states transition, based on which it evaluates the state of
 // ClientConn.
-type connectivityStateEvaluator struct {
+type ConnectivityStateEvaluator struct {
 	numReady            uint64 // Number of addrConns in ready state.
 	numConnecting       uint64 // Number of addrConns in connecting state.
 	numTransientFailure uint64 // Number of addrConns in transientFailure.
 }
 
-// recordTransition records state change happening in every subConn and based on
+// RecordTransition records state change happening in every subConn and based on
 // that it evaluates what aggregated state should be.
 // It can only transition between Ready, Connecting and TransientFailure. Other states,
 // Idle and Shutdown are transitioned into by ClientConn; in the beginning of the connection
@@ -98,7 +93,7 @@ type connectivityStateEvaluator struct {
 // closes it is in Shutdown state.
 //
 // recordTransition should only be called synchronously from the same goroutine.
-func (cse *connectivityStateEvaluator) recordTransition(
+func (cse *ConnectivityStateEvaluator) RecordTransition(
 	oldState,
 	newState connectivity.State,
 ) connectivity.State {
@@ -152,13 +147,13 @@ func (ref *subConnRef) streamsDecr() {
 type gcpBalancer struct {
 	addrs   []resolver.Address
 	cc      balancer.ClientConn
-	csEvltr *connectivityStateEvaluator
+	csEvltr *ConnectivityStateEvaluator
 	state   connectivity.State
-	mu      sync.Mutex
 
-	affinityMap map[string]balancer.SubConn             // Maps affinity key to SubConn
-	scRefs      map[balancer.SubConn]*subConnRef        // Maps SubConn to its subConnRef
-	scStates    map[balancer.SubConn]connectivity.State // Maps SubConn to its connectivity state
+	mu          sync.Mutex
+	affinityMap map[string]balancer.SubConn
+	scStates    map[balancer.SubConn]connectivity.State
+	scRefs      map[balancer.SubConn]*subConnRef
 
 	picker balancer.Picker
 }
@@ -184,6 +179,13 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 		scRef.subConn.UpdateAddresses(addrs)
 		scRef.subConn.Connect()
 	}
+}
+
+// check current connection pool size
+func (gb *gcpBalancer) getConnectionPoolSize() int {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+	return len(gb.scRefs)
 }
 
 // newSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
@@ -262,7 +264,7 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 //  - built by the pickerBuilder with all READY SubConns otherwise.
 func (gb *gcpBalancer) regeneratePicker() {
 	if gb.state == connectivity.TransientFailure {
-		gb.picker = NewErrPicker(balancer.ErrTransientFailure)
+		gb.picker = newErrPicker(balancer.ErrTransientFailure)
 		return
 	}
 	readyRefs := []*subConnRef{}
@@ -301,7 +303,7 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 	gb.mu.Unlock()
 
 	oldAggrState := gb.state
-	gb.state = gb.csEvltr.recordTransition(oldS, s)
+	gb.state = gb.csEvltr.RecordTransition(oldS, s)
 
 	// Regenerate picker when one of the following happens:
 	//  - this sc became ready from not-ready
