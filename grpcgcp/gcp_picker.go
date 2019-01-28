@@ -165,34 +165,27 @@ func getAffinityKeyFromMessage(
 	locator string,
 	msg interface{},
 ) (affinityKey string, err error) {
-	if locator == "" {
-		return "", fmt.Errorf("affinityKey locator is not valid")
+	names := strings.Split(locator, ".")
+	if len(names) == 0 {
+		return "", fmt.Errorf("Empty affinityKey locator")
 	}
 
-	names := strings.Split(locator, ".")
 	val := reflect.ValueOf(msg).Elem()
 
-	i := 0
-	res := ""
-
-	for ; i < len(names); i++ {
-		name := names[i]
-		titledName := strings.Title(name)
-		valField := val.FieldByName(titledName)
-		if valField.Kind() == reflect.String {
-			res = valField.String()
-			break
-		} else if valField.Kind() == reflect.Ptr {
-			val = valField.Elem()
-		} else {
-			break
+	// Fields in names except for the last one.
+	for _, name := range names[:len(names)-1] {
+		valField := val.FieldByName(strings.Title(name))
+		if valField.Kind() != reflect.Ptr && valField.Kind() != reflect.Struct {
+			return "", fmt.Errorf("Invalid locator path for %v", locator)
 		}
+		val = valField.Elem()
 	}
 
-	if i == len(names)-1 && res != "" {
-		return res, nil
+	valField := val.FieldByName(strings.Title(names[len(names)-1]))
+	if valField.Kind() != reflect.String {
+		return "", fmt.Errorf("Cannot get string value from %v", locator)
 	}
-	return "", fmt.Errorf("cannot get valid affinity key from locator: %v", locator)
+	return valField.String(), nil
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().

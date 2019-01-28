@@ -88,21 +88,21 @@ func TestInvalidKeyLocator(t *testing.T) {
 	}
 
 	locator := "invalidLocator"
-	expectedErr := fmt.Sprintf("cannot get valid affinity key from locator: %v", locator)
+	expectedErr := fmt.Sprintf("Cannot get string value from %v", locator)
 	_, err := getAffinityKeyFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
 		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 
 	locator = "key.invalidLocator"
-	expectedErr = fmt.Sprintf("cannot get valid affinity key from locator: %v", locator)
+	expectedErr = fmt.Sprintf("Invalid locator path for %v", locator)
 	_, err = getAffinityKeyFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
 		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 
 	locator = "nestedField.key.invalidLocator"
-	expectedErr = fmt.Sprintf("cannot get valid affinity key from locator: %v", locator)
+	expectedErr = fmt.Sprintf("Invalid locator path for %v", locator)
 	_, err = getAffinityKeyFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
 		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
