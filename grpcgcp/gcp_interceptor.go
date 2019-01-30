@@ -20,6 +20,7 @@ package grpcgcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 
@@ -112,6 +113,7 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 		opts:     opts,
 	}
 	cs.cond = sync.NewCond(cs)
+	cs.doneInitStream = false
 	return cs, nil
 }
 
@@ -119,17 +121,19 @@ type gcpClientStream struct {
 	sync.Mutex
 	grpc.ClientStream
 
-	cond     *sync.Cond
-	gcpInt   *GCPInterceptor
-	ctx      context.Context
-	desc     *grpc.StreamDesc
-	cc       *grpc.ClientConn
-	method   string
-	streamer grpc.Streamer
-	opts     []grpc.CallOption
+	cond           *sync.Cond
+	doneInitStream bool
+	gcpInt         *GCPInterceptor
+	ctx            context.Context
+	desc           *grpc.StreamDesc
+	cc             *grpc.ClientConn
+	method         string
+	streamer       grpc.Streamer
+	opts           []grpc.CallOption
 }
 
 func (cs *gcpClientStream) SendMsg(m interface{}) error {
+	cs.Lock()
 	// Initialize underlying ClientStream when getting the first request.
 	if cs.ClientStream == nil {
 		affinityCfg, ok := cs.gcpInt.methodToAffinity[cs.method]
@@ -144,13 +148,16 @@ func (cs *gcpClientStream) SendMsg(m interface{}) error {
 		}
 		realCS, err := cs.streamer(ctx, cs.desc, cs.cc, cs.method, cs.opts...)
 		if err != nil {
+			cs.doneInitStream = true
+			cs.Unlock()
+			cs.cond.Broadcast()
 			return err
 		}
-		cs.Lock()
+		cs.doneInitStream = true
 		cs.ClientStream = realCS
-		cs.Unlock()
-		cs.cond.Broadcast()
 	}
+	cs.Unlock()
+	cs.cond.Broadcast()
 	return cs.ClientStream.SendMsg(m)
 }
 
@@ -158,8 +165,12 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 	// If RecvMsg is called before SendMsg, it should wait until cs.ClientStream
 	// is initialized, to avoid nil pointer error.
 	cs.Lock()
-	for cs.ClientStream == nil {
+	for !cs.doneInitStream {
 		cs.cond.Wait()
+	}
+	if cs.ClientStream == nil {
+		cs.Unlock()
+		return fmt.Errorf("gcpClientStream.RecvMsg cannot proceed due to failure when initializing client stream")
 	}
 	cs.Unlock()
 	return cs.ClientStream.RecvMsg(m)
