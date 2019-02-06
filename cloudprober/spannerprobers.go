@@ -15,7 +15,7 @@
  *
  */
 
-package probers
+package main
 
 import (
 	"context"
@@ -37,7 +37,7 @@ const (
 	testUsername = "test_username"
 )
 
-func CreateClient() *spanner.Client {
+func createClient() *spanner.Client {
 	ctx := context.Background()
 	client, _ := spanner.NewClient(ctx)
 	if client == nil {
@@ -47,7 +47,7 @@ func CreateClient() *spanner.Client {
 	return client
 }
 
-func SessionManagementProber(client *spanner.Client, metrics map[string]int64) error {
+func sessionManagementProber(client *spanner.Client, metrics map[string]int64) error {
 	ctx := context.Background()
 	reqCreate := &spannerpb.CreateSessionRequest{
 		Database: database,
@@ -107,7 +107,7 @@ func SessionManagementProber(client *spanner.Client, metrics map[string]int64) e
 	return nil
 }
 
-func ExecuteSqlProber(client *spanner.Client, metrics map[string]int64) error {
+func executeSqlProber(client *spanner.Client, metrics map[string]int64) error {
 	ctx := context.Background()
 	session := createSession(client)
 	defer deleteSession(client, session)
@@ -146,7 +146,7 @@ func ExecuteSqlProber(client *spanner.Client, metrics map[string]int64) error {
 	return nil
 }
 
-func ReadProber(client *spanner.Client, metrics map[string]int64) error {
+func readProber(client *spanner.Client, metrics map[string]int64) error {
 	ctx := context.Background()
 	session := createSession(client)
 	defer deleteSession(client, session)
@@ -189,7 +189,7 @@ func ReadProber(client *spanner.Client, metrics map[string]int64) error {
 	return nil
 }
 
-func TransactionProber(client *spanner.Client, metrics map[string]int64) error {
+func transactionProber(client *spanner.Client, metrics map[string]int64) error {
 	ctx := context.Background()
 	session := createSession(client)
 	reqBegin := &spannerpb.BeginTransactionRequest{
@@ -246,7 +246,7 @@ func TransactionProber(client *spanner.Client, metrics map[string]int64) error {
 	return nil
 }
 
-func PartitionProber(client *spanner.Client, metrics map[string]int64) error {
+func partitionProber(client *spanner.Client, metrics map[string]int64) error {
 	ctx := context.Background()
 	session := createSession(client)
 	defer deleteSession(client, session)

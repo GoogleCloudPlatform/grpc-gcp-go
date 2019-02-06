@@ -22,7 +22,6 @@ import (
 	"log"
 	"os"
 
-	prober "./probers"
 	spanner "cloud.google.com/go/spanner/apiv1"
 )
 
@@ -49,13 +48,13 @@ func executeSpannerProber(p spannerProber, client *spanner.Client, metrics map[s
 
 func executeSpannerProbers() {
 	metrics := make(map[string]int64)
-	client := prober.CreateClient()
+	client := createClient()
 	failureCount := 0
-	executeSpannerProber(prober.SessionManagementProber, client, metrics, &failureCount)
-	executeSpannerProber(prober.ExecuteSqlProber, client, metrics, &failureCount)
-	executeSpannerProber(prober.ReadProber, client, metrics, &failureCount)
-	executeSpannerProber(prober.TransactionProber, client, metrics, &failureCount)
-	executeSpannerProber(prober.PartitionProber, client, metrics, &failureCount)
+	executeSpannerProber(sessionManagementProber, client, metrics, &failureCount)
+	executeSpannerProber(executeSqlProber, client, metrics, &failureCount)
+	executeSpannerProber(readProber, client, metrics, &failureCount)
+	executeSpannerProber(transactionProber, client, metrics, &failureCount)
+	executeSpannerProber(partitionProber, client, metrics, &failureCount)
 
 	util := newStackdriverUtil("Spanner")
 	if failureCount == 0 {
