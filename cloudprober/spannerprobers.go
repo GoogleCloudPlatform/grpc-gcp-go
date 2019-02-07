@@ -20,8 +20,8 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
 
@@ -41,7 +41,7 @@ func createClient() *spanner.Client {
 	ctx := context.Background()
 	client, _ := spanner.NewClient(ctx)
 	if client == nil {
-		fmt.Println("Fail to create the client.")
+		log.Fatal("Fail to create the client.")
 		os.Exit(1)
 	}
 	return client
@@ -54,8 +54,11 @@ func sessionManagementProber(client *spanner.Client, metrics map[string]int64) e
 	}
 	start := time.Now()
 	session, err := client.CreateSession(ctx, reqCreate)
-	if err != nil || session == nil {
-		return errors.New(err.Error() + " Failded to create a new session.")
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return errors.New("failded to create a new session")
 	}
 	metrics["create_session_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
 
@@ -75,8 +78,11 @@ func sessionManagementProber(client *spanner.Client, metrics map[string]int64) e
 	}
 	start = time.Now()
 	respGet, err := client.GetSession(ctx, reqGet)
-	if err != nil || reqGet == nil || respGet.Name != session.Name {
-		return errors.New(err.Error() + "Fail to get the session")
+	if err != nil {
+		return err
+	}
+	if reqGet == nil || respGet.Name != session.Name {
+		return errors.New("fail to get the session")
 	}
 	metrics["get_session_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
 
@@ -102,7 +108,7 @@ func sessionManagementProber(client *spanner.Client, metrics map[string]int64) e
 	}
 	metrics["list_sessions_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
 	if !inList {
-		return errors.New("ListSessions failed.")
+		return errors.New("list sessions failed")
 	}
 	return nil
 }
@@ -119,8 +125,11 @@ func executeSqlProber(client *spanner.Client, metrics map[string]int64) error {
 	// ExecuteSql
 	start := time.Now()
 	respSql, err1 := client.ExecuteSql(ctx, reqSql)
-	if err1 != nil || respSql == nil || len(respSql.Rows) != 1 || respSql.Rows[0].Values[0].GetStringValue() != testUsername {
-		return errors.New(err1.Error() + "ExecuteSql failed.")
+	if err1 != nil {
+		return err1
+	}
+	if respSql == nil || len(respSql.Rows) != 1 || respSql.Rows[0].Values[0].GetStringValue() != testUsername {
+		return errors.New("execute sql failed")
 	}
 	metrics["execute_sql_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
 
@@ -128,7 +137,7 @@ func executeSqlProber(client *spanner.Client, metrics map[string]int64) error {
 	start = time.Now()
 	stream, err2 := client.ExecuteStreamingSql(ctx, reqSql)
 	if err2 != nil {
-		return errors.New(err2.Error())
+		return err2
 	}
 	for {
 		resp, err := stream.Recv()
@@ -138,8 +147,8 @@ func executeSqlProber(client *spanner.Client, metrics map[string]int64) error {
 		if err != nil {
 			return err
 		}
-		if err != nil || resp == nil || resp.Values[0].GetStringValue() != testUsername {
-			return errors.New(err.Error() + "ExecuteStreamingSql failed.")
+		if resp == nil || resp.Values[0].GetStringValue() != testUsername {
+			return errors.New("execute streaming sql failed")
 		}
 	}
 	metrics["execute_streaming_sql_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
@@ -162,8 +171,11 @@ func readProber(client *spanner.Client, metrics map[string]int64) error {
 	// Read
 	start := time.Now()
 	respRead, err1 := client.Read(ctx, reqRead)
-	if err1 != nil || respRead == nil || len(respRead.Rows) != 1 || respRead.Rows[0].Values[0].GetStringValue() != testUsername {
-		return errors.New(err1.Error() + "ExecuteRead failed.")
+	if err1 != nil {
+		return err1
+	}
+	if respRead == nil || len(respRead.Rows) != 1 || respRead.Rows[0].Values[0].GetStringValue() != testUsername {
+		return errors.New("execute read failed")
 	}
 	metrics["read_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
 
@@ -181,8 +193,8 @@ func readProber(client *spanner.Client, metrics map[string]int64) error {
 		if err != nil {
 			return err
 		}
-		if err != nil || resp == nil || resp.Values[0].GetStringValue() != testUsername {
-			return errors.New(err.Error() + "StreamingRead failed.")
+		if resp == nil || resp.Values[0].GetStringValue() != testUsername {
+			return errors.New("streaming read failed")
 		}
 	}
 	metrics["streaming_read_latency_ms"] = int64(time.Now().Sub(start) / time.Millisecond)
@@ -298,8 +310,12 @@ func createSession(client *spanner.Client) *spannerpb.Session {
 		Database: database,
 	}
 	session, err := client.CreateSession(ctx, reqCreate)
-	if err != nil || session == nil {
-		fmt.Println(err.Error() + " Failded to create a new session.")
+	if err != nil {
+		log.Fatal(err.Error())
+		return nil
+	}
+	if session == nil {
+		log.Fatal("Failded to create a new session.")
 		return nil
 	}
 	return session
