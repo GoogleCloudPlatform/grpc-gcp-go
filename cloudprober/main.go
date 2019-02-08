@@ -19,7 +19,6 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	spanner "cloud.google.com/go/spanner/apiv1"
@@ -38,11 +37,11 @@ func parseArgs() []bool {
 
 type spannerProber func(*spanner.Client, map[string]int64) error
 
-func executeSpannerProber(p spannerProber, client *spanner.Client, metrics map[string]int64, count *int) {
+func executeSpannerProber(p spannerProber, client *spanner.Client, metrics map[string]int64, count *int, util *stackdriverUtil) {
 	err := p(client, metrics)
 	if err != nil {
 		*count = (*count) + 1
-		log.Fatal(err.Error())
+		util.reportError(err)
 	}
 }
 
@@ -50,13 +49,16 @@ func executeSpannerProbers() {
 	metrics := make(map[string]int64)
 	client := createClient()
 	failureCount := 0
-	executeSpannerProber(sessionManagementProber, client, metrics, &failureCount)
-	executeSpannerProber(executeSqlProber, client, metrics, &failureCount)
-	executeSpannerProber(readProber, client, metrics, &failureCount)
-	executeSpannerProber(transactionProber, client, metrics, &failureCount)
-	executeSpannerProber(partitionProber, client, metrics, &failureCount)
 
 	util := newStackdriverUtil("Spanner")
+	defer util.closeErrClient()
+
+	executeSpannerProber(sessionManagementProber, client, metrics, &failureCount, util)
+	executeSpannerProber(executeSqlProber, client, metrics, &failureCount, util)
+	executeSpannerProber(readProber, client, metrics, &failureCount, util)
+	executeSpannerProber(transactionProber, client, metrics, &failureCount, util)
+	executeSpannerProber(partitionProber, client, metrics, &failureCount, util)
+
 	if failureCount == 0 {
 		util.setSuccess()
 	}
@@ -65,7 +67,6 @@ func executeSpannerProbers() {
 }
 
 func main() {
-	log.Print("Start probing...")
 	vars := parseArgs()
 	if vars[0] {
 		executeSpannerProbers()

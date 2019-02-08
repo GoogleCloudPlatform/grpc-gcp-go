@@ -18,17 +18,56 @@
 
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"cloud.google.com/go/errorreporting"
+)
+
+const (
+	projectID = "grpc-prober-testing"
+)
 
 type stackdriverUtil struct {
-	metrics map[string]int64
-	apiName string
-	success bool
+	metrics   map[string]int64
+	apiName   string
+	success   bool
+	errClient *errorreporting.Client
 }
 
 func newStackdriverUtil(name string) *stackdriverUtil {
 	m := make(map[string]int64)
-	return &stackdriverUtil{m, name, false}
+	ctx := context.Background()
+	errorClient, err := errorreporting.NewClient(ctx, projectID, errorreporting.Config{
+		ServiceName: "grpc-go-cloudprober",
+		OnError: func(err error) {
+			fmt.Fprintln(os.Stderr, "Could not log error: %v", err)
+		},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		return &stackdriverUtil{m, name, false, nil}
+
+	}
+	return &stackdriverUtil{m, name, false, errorClient}
+}
+
+func (util *stackdriverUtil) closeErrClient() {
+	if util.errClient != nil {
+		util.errClient.Close()
+	}
+}
+
+func (util *stackdriverUtil) reportError(err error) {
+	// Report to the stderr.
+	fmt.Fprintln(os.Stderr, err.Error())
+
+	//Report to the stackdriver error log.
+	util.errClient.Report(errorreporting.Entry{
+		Error: err,
+	})
 }
 
 func (util *stackdriverUtil) addMetric(key string, value int64) {
