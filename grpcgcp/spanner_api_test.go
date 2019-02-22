@@ -26,6 +26,7 @@ import (
 
 	"cloud.google.com/go/spanner"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
+	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 )
@@ -39,9 +40,51 @@ const (
 )
 
 func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
-	apiConfig, err := grpcgcp.ParseAPIConfig("spanner.grpc.config")
-	if err != nil {
-		t.Fatalf("Failed to parse api config file: %v", err)
+	apiConfig := &configpb.ApiConfig{
+		ChannelPool: &configpb.ChannelPoolConfig{
+			MaxSize:                          10,
+			MaxConcurrentStreamsLowWatermark: 1,
+		},
+		Method: []*configpb.MethodConfig{
+			&configpb.MethodConfig{
+				Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
+				Affinity: &configpb.AffinityConfig{
+					Command:     configpb.AffinityConfig_BIND,
+					AffinityKey: "name",
+				},
+			},
+			&configpb.MethodConfig{
+				Name: []string{"/google.spanner.v1.Spanner/GetSession"},
+				Affinity: &configpb.AffinityConfig{
+					Command:     configpb.AffinityConfig_BOUND,
+					AffinityKey: "name",
+				},
+			},
+			&configpb.MethodConfig{
+				Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
+				Affinity: &configpb.AffinityConfig{
+					Command:     configpb.AffinityConfig_UNBIND,
+					AffinityKey: "name",
+				},
+			},
+			&configpb.MethodConfig{
+				Name: []string{
+					"/google.spanner.v1.Spanner/ExecuteSql",
+					"/google.spanner.v1.Spanner/ExecuteStreamingSql",
+					"/google.spanner.v1.Spanner/Read",
+					"/google.spanner.v1.Spanner/StreamingRead",
+					"/google.spanner.v1.Spanner/BeginTransaction",
+					"/google.spanner.v1.Spanner/Commit",
+					"/google.spanner.v1.Spanner/Rollback",
+					"/google.spanner.v1.Spanner/PartitionQuery",
+					"/google.spanner.v1.Spanner/PartitionRead",
+				},
+				Affinity: &configpb.AffinityConfig{
+					Command:     configpb.AffinityConfig_BOUND,
+					AffinityKey: "session",
+				},
+			},
+		},
 	}
 	gcpInt := grpcgcp.NewGCPInterceptor(apiConfig)
 	opts := []option.ClientOption{
