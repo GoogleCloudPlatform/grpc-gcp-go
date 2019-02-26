@@ -41,7 +41,8 @@ type gcpContext struct {
 	replyMsg interface{}
 }
 
-// GCPInterceptor represents the interceptor for GCP specific features
+// GCPInterceptor provides functions for intercepting client requests
+// in order to support GCP specific features
 type GCPInterceptor struct {
 	channelPoolCfg *pb.ChannelPoolConfig
 	// Maps method path to AffinityConfig
@@ -67,8 +68,8 @@ func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
 	}
 }
 
-// GCPUnaryClientInterceptor intercepts the execution of a unary RPC on the
-// client using grpcgcp extension.
+// GCPUnaryClientInterceptor intercepts the execution of a unary RPC
+// and injects necessary information to be used by the picker.
 func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 	ctx context.Context,
 	method string,
@@ -91,7 +92,7 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 }
 
 // GCPStreamClientInterceptor intercepts the execution of a client streaming RPC
-// using grpcgcp extension.
+// and injects necessary information to be used by the picker.
 func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 	ctx context.Context,
 	desc *grpc.StreamDesc,

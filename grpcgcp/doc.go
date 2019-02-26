@@ -18,6 +18,7 @@
 
 /*
 Package grpcgcp provides grpc supports for Google Cloud APIs.
+For now it provides connection management with affinity support.
 
 Usage:
 
