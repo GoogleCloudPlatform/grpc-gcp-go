@@ -17,26 +17,31 @@ syntax = "proto3";
 package grpc.gcp;
 
 message ApiConfig {
-  // The channel/connection pool configurations.
+  // The channel pool configurations.
   ChannelPoolConfig channel_pool = 2;
 
   // The method configurations.
   repeated MethodConfig method = 1001;
 }
 
+// ChannelPoolConfig are options for configuring the channel pool.
+// RPCs will be scheduled onto existing channels in the pool until all channels
+// have <max_concurrent_streams_low_watermark> number of streams. At this point
+// a new channel is spun out. Once <max_size> channels have been spun out and
+// each has <max_concurrent_streams_low_watermark> streams, subsequent RPCs will
+// hang until any of the in-flight RPCs is finished, freeing up a channel.
 message ChannelPoolConfig {
-  // The max number of channels/connections in the pool.
+  // The max number of channels in the pool.
   // Default value is 0, meaning 'unlimited' size.
   uint32 max_size = 1;
 
-  // The idle timeout (seconds) of channels/connections without bound affinity sessions.
+  // The idle timeout (seconds) of channels without bound affinity sessions.
   uint64 idle_timeout = 2;
 
   // The low watermark of max number of concurrent streams in a channel.
-  // New channel/connection will be created once it get hit, until we reach
-  // the max size of the channel/connection pool.
-  // Default value is 100, and the valid range is [1, 100], any value greater
-  // than 100 will be rounded down to 100.
+  // New channel will be created once it get hit, until we reach the max size of the channel pool.
+  // Default value is 100. The valid range is [1, 100]. Any value outside the range will be ignored and the default value will be used.
+  // Note: It is not recommended that users adjust this value, since a single channel should generally have no trouble managing the default (maximum) number of streams.
   uint32 max_concurrent_streams_low_watermark = 3;
 }
 
@@ -46,7 +51,7 @@ message MethodConfig {
   // sequentially, and the first one takes precedence.
   repeated string name = 1;
 
-  // The channel/connection affinity configurations.
+  // The channel affinity configurations.
   AffinityConfig affinity = 1001;
 }
 
@@ -56,13 +61,13 @@ message AffinityConfig {
     // to execute the RPC. The corresponding <affinity_key_field_path> will be
     // used to find the affinity key from the request message.
     BOUND = 0;
-    // The annotated method will establish the channel/connection affinity with the
-    // channel/connection which is used to execute the RPC. The corresponding
+    // The annotated method will establish the channel affinity with the
+    // channel which is used to execute the RPC. The corresponding
     // <affinity_key_field_path> will be used to find the affinity key from the
     // response message.
     BIND = 1;
-    // The annotated method will remove the channel/connection affinity with the
-    // channel/connection which is used to execute the RPC. The corresponding
+    // The annotated method will remove the channel affinity with the
+    // channel which is used to execute the RPC. The corresponding
     // <affinity_key_field_path> will be used to find the affinity key from the
     // request message.
     UNBIND = 2;
