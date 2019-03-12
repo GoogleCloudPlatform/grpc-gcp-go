@@ -17,7 +17,7 @@ syntax = "proto3";
 package grpc.gcp;
 
 message ApiConfig {
-  // The channel pool configurations.
+  // The channel/connection pool configurations.
   ChannelPoolConfig channel_pool = 2;
 
   // The method configurations.
@@ -25,13 +25,18 @@ message ApiConfig {
 }
 
 message ChannelPoolConfig {
-  // The max number of channels in the pool.
+  // The max number of channels/connections in the pool.
+  // Default value is 0, meaning 'unlimited' size.
   uint32 max_size = 1;
-  // The idle timeout (seconds) of channels without bound affinity sessions.
+
+  // The idle timeout (seconds) of channels/connections without bound affinity sessions.
   uint64 idle_timeout = 2;
+
   // The low watermark of max number of concurrent streams in a channel.
-  // New channel will be created once it get hit, until we reach the max size
-  // of the channel pool.
+  // New channel/connection will be created once it get hit, until we reach
+  // the max size of the channel/connection pool.
+  // Default value is 100, and the valid range is [1, 100], any value greater
+  // than 100 will be rounded down to 100.
   uint32 max_concurrent_streams_low_watermark = 3;
 }
 
@@ -41,7 +46,7 @@ message MethodConfig {
   // sequentially, and the first one takes precedence.
   repeated string name = 1;
 
-  // The channel affinity configurations.
+  // The channel/connection affinity configurations.
   AffinityConfig affinity = 1001;
 }
 
@@ -51,13 +56,13 @@ message AffinityConfig {
     // to execute the RPC. The corresponding <affinity_key_field_path> will be
     // used to find the affinity key from the request message.
     BOUND = 0;
-    // The annotated method will establish the channel affinity with the channel
-    // which is used to execute the RPC. The corresponding
+    // The annotated method will establish the channel/connection affinity with the
+    // channel/connection which is used to execute the RPC. The corresponding
     // <affinity_key_field_path> will be used to find the affinity key from the
     // response message.
     BIND = 1;
-    // The annotated method will remove the channel affinity with the channel
-    // which is used to execute the RPC. The corresponding
+    // The annotated method will remove the channel/connection affinity with the
+    // channel/connection which is used to execute the RPC. The corresponding
     // <affinity_key_field_path> will be used to find the affinity key from the
     // request message.
     UNBIND = 2;

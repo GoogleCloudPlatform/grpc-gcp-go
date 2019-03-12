@@ -25,13 +25,13 @@ const (
 	// to execute the RPC. The corresponding <affinity_key_field_path> will be
 	// used to find the affinity key from the request message.
 	AffinityConfig_BOUND AffinityConfig_Command = 0
-	// The annotated method will establish the channel affinity with the channel
-	// which is used to execute the RPC. The corresponding
+	// The annotated method will establish the channel/connection affinity with the
+	// channel/connection which is used to execute the RPC. The corresponding
 	// <affinity_key_field_path> will be used to find the affinity key from the
 	// response message.
 	AffinityConfig_BIND AffinityConfig_Command = 1
-	// The annotated method will remove the channel affinity with the channel
-	// which is used to execute the RPC. The corresponding
+	// The annotated method will remove the channel/connection affinity with the
+	// channel/connection which is used to execute the RPC. The corresponding
 	// <affinity_key_field_path> will be used to find the affinity key from the
 	// request message.
 	AffinityConfig_UNBIND AffinityConfig_Command = 2
@@ -52,11 +52,11 @@ func (x AffinityConfig_Command) String() string {
 	return proto.EnumName(AffinityConfig_Command_name, int32(x))
 }
 func (AffinityConfig_Command) EnumDescriptor() ([]byte, []int) {
-	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{3, 0}
+	return fileDescriptor_grpc_gcp_5cb0e474c2caa666, []int{3, 0}
 }
 
 type ApiConfig struct {
-	// The channel pool configurations.
+	// The channel/connection pool configurations.
 	ChannelPool *ChannelPoolConfig `protobuf:"bytes,2,opt,name=channel_pool,json=channelPool,proto3" json:"channel_pool,omitempty"`
 	// The method configurations.
 	Method               []*MethodConfig `protobuf:"bytes,1001,rep,name=method,proto3" json:"method,omitempty"`
@@ -69,7 +69,7 @@ func (m *ApiConfig) Reset()         { *m = ApiConfig{} }
 func (m *ApiConfig) String() string { return proto.CompactTextString(m) }
 func (*ApiConfig) ProtoMessage()    {}
 func (*ApiConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{0}
+	return fileDescriptor_grpc_gcp_5cb0e474c2caa666, []int{0}
 }
 func (m *ApiConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ApiConfig.Unmarshal(m, b)
@@ -104,13 +104,16 @@ func (m *ApiConfig) GetMethod() []*MethodConfig {
 }
 
 type ChannelPoolConfig struct {
-	// The max number of channels in the pool.
+	// The max number of channels/connections in the pool.
+	// Default value is 0, meaning 'unlimited' size.
 	MaxSize uint32 `protobuf:"varint,1,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
-	// The idle timeout (seconds) of channels without bound affinity sessions.
+	// The idle timeout (seconds) of channels/connections without bound affinity sessions.
 	IdleTimeout uint64 `protobuf:"varint,2,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
 	// The low watermark of max number of concurrent streams in a channel.
-	// New channel will be created once it get hit, until we reach the max size
-	// of the channel pool.
+	// New channel/connection will be created once it get hit, until we reach
+	// the max size of the channel/connection pool.
+	// Default value is 100, and the valid range is [1, 100], any value greater
+	// than 100 will be rounded down to 100.
 	MaxConcurrentStreamsLowWatermark uint32   `protobuf:"varint,3,opt,name=max_concurrent_streams_low_watermark,json=maxConcurrentStreamsLowWatermark,proto3" json:"max_concurrent_streams_low_watermark,omitempty"`
 	XXX_NoUnkeyedLiteral             struct{} `json:"-"`
 	XXX_unrecognized                 []byte   `json:"-"`
@@ -121,7 +124,7 @@ func (m *ChannelPoolConfig) Reset()         { *m = ChannelPoolConfig{} }
 func (m *ChannelPoolConfig) String() string { return proto.CompactTextString(m) }
 func (*ChannelPoolConfig) ProtoMessage()    {}
 func (*ChannelPoolConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{1}
+	return fileDescriptor_grpc_gcp_5cb0e474c2caa666, []int{1}
 }
 func (m *ChannelPoolConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ChannelPoolConfig.Unmarshal(m, b)
@@ -167,7 +170,7 @@ type MethodConfig struct {
 	// with .*, such as foo.bar.A, foo.bar.*. Method configs are evaluated
 	// sequentially, and the first one takes precedence.
 	Name []string `protobuf:"bytes,1,rep,name=name,proto3" json:"name,omitempty"`
-	// The channel affinity configurations.
+	// The channel/connection affinity configurations.
 	Affinity             *AffinityConfig `protobuf:"bytes,1001,opt,name=affinity,proto3" json:"affinity,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}        `json:"-"`
 	XXX_unrecognized     []byte          `json:"-"`
@@ -178,7 +181,7 @@ func (m *MethodConfig) Reset()         { *m = MethodConfig{} }
 func (m *MethodConfig) String() string { return proto.CompactTextString(m) }
 func (*MethodConfig) ProtoMessage()    {}
 func (*MethodConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{2}
+	return fileDescriptor_grpc_gcp_5cb0e474c2caa666, []int{2}
 }
 func (m *MethodConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_MethodConfig.Unmarshal(m, b)
@@ -227,7 +230,7 @@ func (m *AffinityConfig) Reset()         { *m = AffinityConfig{} }
 func (m *AffinityConfig) String() string { return proto.CompactTextString(m) }
 func (*AffinityConfig) ProtoMessage()    {}
 func (*AffinityConfig) Descriptor() ([]byte, []int) {
-	return fileDescriptor_grpc_gcp_6523d203f3e2e601, []int{3}
+	return fileDescriptor_grpc_gcp_5cb0e474c2caa666, []int{3}
 }
 func (m *AffinityConfig) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_AffinityConfig.Unmarshal(m, b)
@@ -269,9 +272,9 @@ func init() {
 	proto.RegisterEnum("grpc.gcp.AffinityConfig_Command", AffinityConfig_Command_name, AffinityConfig_Command_value)
 }
 
-func init() { proto.RegisterFile("grpc_gcp.proto", fileDescriptor_grpc_gcp_6523d203f3e2e601) }
+func init() { proto.RegisterFile("grpc_gcp.proto", fileDescriptor_grpc_gcp_5cb0e474c2caa666) }
 
-var fileDescriptor_grpc_gcp_6523d203f3e2e601 = []byte{
+var fileDescriptor_grpc_gcp_5cb0e474c2caa666 = []byte{
 	// 372 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x52, 0x4d, 0xeb, 0xd3, 0x30,
 	0x18, 0xb7, 0xdb, 0x5c, 0xdb, 0xa7, 0x73, 0xcc, 0x1c, 0xa4, 0xe2, 0xa5, 0x16, 0x0f, 0xc5, 0x43,
