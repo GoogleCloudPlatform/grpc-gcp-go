@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
+	"google.golang.org/grpc/balancer"
 )
 
 func TestInitApiConfig(t *testing.T) {
@@ -39,6 +40,9 @@ func TestInitApiConfig(t *testing.T) {
 	}
 	if gcpInt.poolCfg.maxStream != expectedStreams {
 		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, expectedStreams)
+	}
+	if len(gcpInt.methodToAffinity) != 0 {
+		t.Errorf("methodToAffinity has incorrect size: %v, want: %v", len(gcpInt.methodToAffinity), 0)
 	}
 }
 
@@ -80,5 +84,65 @@ func TestDefaultApiConfig(t *testing.T) {
 	}
 	if gcpInt.poolCfg.maxStream != defaultStreams {
 		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, defaultStreams)
+	}
+}
+
+func TestParseJsonApiConfig(t *testing.T) {
+	expectedSize := uint32(10)
+	expectedStreams := uint32(10)
+	apiConfig, err := ParseAPIConfig("test_config.json")
+	if err != nil {
+		t.Fatalf("Failed to parse api config file: %v", err)
+	}
+
+	// Register test builder wrapper
+	balancer.Register(&testBuilderWrapper{
+		name:        Name,
+		realBuilder: &gcpBalancerBuilder{name: Name},
+	})
+
+	gcpInt := NewGCPInterceptor(apiConfig)
+
+	if gcpInt.poolCfg.maxConn != expectedSize {
+		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, expectedSize)
+	}
+	if gcpInt.poolCfg.maxStream != expectedStreams {
+		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, expectedStreams)
+	}
+
+	if gcpInt.methodToAffinity == nil {
+		t.Fatalf("gcpInt.methodToAffinity should not be nil")
+	}
+
+	expectedMethods := 3
+	if len(gcpInt.methodToAffinity) != expectedMethods {
+		t.Errorf("methodToAffinity has incorrect size: %v, want: %v", len(gcpInt.methodToAffinity), expectedMethods)
+	}
+
+	methodName := "method1"
+	affCfg, ok := gcpInt.methodToAffinity[methodName]
+	if !ok {
+		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
+	}
+	if affCfg.GetCommand() != configpb.AffinityConfig_BIND {
+		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_BIND)
+	}
+
+	methodName = "method2"
+	affCfg, ok = gcpInt.methodToAffinity[methodName]
+	if !ok {
+		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
+	}
+	if affCfg.GetCommand() != configpb.AffinityConfig_BOUND {
+		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_BOUND)
+	}
+
+	methodName = "method3"
+	affCfg, ok = gcpInt.methodToAffinity[methodName]
+	if !ok {
+		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
+	}
+	if affCfg.GetCommand() != configpb.AffinityConfig_UNBIND {
+		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_UNBIND)
 	}
 }
