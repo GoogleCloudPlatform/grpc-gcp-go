@@ -107,7 +107,7 @@ Usage:
 
 	conn, err := grpc.Dial(
 		target,
-		// Register and specify the grpc-gcp load balancer
+		// Register and specify the grpc-gcp load balancer.
 		grpc.WithBalancerName("grpc_gcp"),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),

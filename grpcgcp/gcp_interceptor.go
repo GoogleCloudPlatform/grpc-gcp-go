@@ -33,7 +33,7 @@ const (
 	defaultMaxConn = 0
 
 	// Default max stream watermark is 100, which is the current stream limit for GFE.
-	// And any value >100 will be rounded down to 100.
+	// Any value >100 will be rounded down to 100.
 	defaultMaxStream = 100
 )
 
