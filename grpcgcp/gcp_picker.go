@@ -34,16 +34,15 @@ func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs:      readySCRefs,
+		poolCfg:     nil,
 	}
 }
 
 type gcpPicker struct {
 	gcpBalancer *gcpBalancer
-
-	mu        sync.Mutex
-	scRefs    []*subConnRef
-	maxConn   uint32
-	maxStream uint32
+	mu          sync.Mutex
+	scRefs      []*subConnRef
+	poolCfg     *poolConfig
 }
 
 func (p *gcpPicker) Pick(
@@ -61,25 +60,11 @@ func (p *gcpPicker) Pick(
 	boundKey := ""
 
 	if hasGcpCtx {
-		affinity := gcpCtx.affinityCfg
-		channelPool := gcpCtx.channelPoolCfg
-		if channelPool != nil {
-			// Initialize p.maxConn and p.maxStream for the first time.
-			if p.maxConn == 0 {
-				if channelPool.GetMaxSize() == 0 {
-					p.maxConn = defaultMaxConn
-				} else {
-					p.maxConn = channelPool.GetMaxSize()
-				}
-			}
-			if p.maxStream == 0 {
-				if channelPool.GetMaxConcurrentStreamsLowWatermark() == 0 {
-					p.maxStream = defaultMaxStream
-				} else {
-					p.maxStream = channelPool.GetMaxConcurrentStreamsLowWatermark()
-				}
-			}
+		if p.poolCfg == nil {
+			// Initialize poolConfig for picker.
+			p.poolCfg = gcpCtx.poolCfg
 		}
+		affinity := gcpCtx.affinityCfg
 		if affinity != nil {
 			locator := affinity.GetAffinityKey()
 			cmd := affinity.GetCommand()
@@ -136,13 +121,13 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	})
 
 	// If the least busy connection still has capacity, use it
-	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < int32(p.maxStream) {
+	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < int32(p.poolCfg.maxStream) {
 		return p.scRefs[0], nil
 	}
 
-	if p.gcpBalancer.getConnectionPoolSize() < int(p.maxConn) {
+	if p.poolCfg.maxConn == 0 || p.gcpBalancer.getConnectionPoolSize() < int(p.poolCfg.maxConn) {
 		// Ask balancer to create new subconn when all current subconns are busy and
-		// the number of subconns has not reached maximum.
+		// the connection pool still has capacity (either unlimited or maxSize is not reached).
 		p.gcpBalancer.newSubConn()
 
 		// Let this picker return ErrNoSubConnAvailable because it needs some time

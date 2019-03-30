@@ -33,10 +33,6 @@ const (
 	// Name is the name of grpc_gcp balancer.
 	Name = "grpc_gcp"
 
-	// Default settings for max pool size and max concurrent streams.
-	defaultMaxConn   = 10
-	defaultMaxStream = 100
-
 	healthCheckEnabled = true
 )
 

@@ -28,13 +28,27 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	// Default max number of connections is 0, meaning "no limit"
+	defaultMaxConn = 0
+
+	// Default max stream watermark is 100, which is the current stream limit for GFE.
+	// Any value >100 will be rounded down to 100.
+	defaultMaxStream = 100
+)
+
 type key int
 
 var gcpKey key
 
+type poolConfig struct {
+	maxConn   uint32
+	maxStream uint32
+}
+
 type gcpContext struct {
-	affinityCfg    *pb.AffinityConfig
-	channelPoolCfg *pb.ChannelPoolConfig
+	affinityCfg *pb.AffinityConfig
+	poolCfg     *poolConfig
 	// request message used for pre-process of an affinity call
 	reqMsg interface{}
 	// response message used for post-process of an affinity call
@@ -44,7 +58,8 @@ type gcpContext struct {
 // GCPInterceptor provides functions for intercepting client requests
 // in order to support GCP specific features
 type GCPInterceptor struct {
-	channelPoolCfg *pb.ChannelPoolConfig
+	poolCfg *poolConfig
+
 	// Maps method path to AffinityConfig
 	methodToAffinity map[string]*pb.AffinityConfig
 }
@@ -62,8 +77,25 @@ func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
 			}
 		}
 	}
+
+	poolCfg := &poolConfig{
+		maxConn:   defaultMaxConn,
+		maxStream: defaultMaxStream,
+	}
+
+	userPoolCfg := config.GetChannelPool()
+
+	// Set user defined MaxSize.
+	poolCfg.maxConn = userPoolCfg.GetMaxSize()
+
+	// Set user defined MaxConcurrentStreamsLowWatermark if ranged in [1, defaultMaxStream],
+	// otherwise use the defaultMaxStream.
+	watermarkValue := userPoolCfg.GetMaxConcurrentStreamsLowWatermark()
+	if watermarkValue >= 1 && watermarkValue <= defaultMaxStream {
+		poolCfg.maxStream = watermarkValue
+	}
 	return &GCPInterceptor{
-		channelPoolCfg:   config.GetChannelPool(),
+		poolCfg:          poolCfg,
 		methodToAffinity: mp,
 	}
 }
@@ -81,10 +113,10 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 ) error {
 	affinityCfg, _ := gcpInt.methodToAffinity[method]
 	gcpCtx := &gcpContext{
-		affinityCfg:    affinityCfg,
-		reqMsg:         req,
-		replyMsg:       reply,
-		channelPoolCfg: gcpInt.channelPoolCfg,
+		affinityCfg: affinityCfg,
+		reqMsg:      req,
+		replyMsg:    reply,
+		poolCfg:     gcpInt.poolCfg,
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 
@@ -139,9 +171,9 @@ func (cs *gcpClientStream) SendMsg(m interface{}) error {
 		ctx := cs.ctx
 		if ok {
 			gcpCtx := &gcpContext{
-				affinityCfg:    affinityCfg,
-				reqMsg:         m,
-				channelPoolCfg: cs.gcpInt.channelPoolCfg,
+				affinityCfg: affinityCfg,
+				reqMsg:      m,
+				poolCfg:     cs.gcpInt.poolCfg,
 			}
 			ctx = context.WithValue(cs.ctx, gcpKey, gcpCtx)
 		}

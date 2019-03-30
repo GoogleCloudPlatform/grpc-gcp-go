@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/balancer"
@@ -141,9 +140,9 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 
 	ctx := context.Background()
 	gcpCtx := &gcpContext{
-		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
-			MaxSize:                          10,
-			MaxConcurrentStreamsLowWatermark: 100,
+		poolCfg: &poolConfig{
+			maxConn:   10,
+			maxStream: 100,
 		},
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
@@ -188,9 +187,9 @@ func TestPickNewSubConn(t *testing.T) {
 
 	ctx := context.Background()
 	gcpCtx := &gcpContext{
-		channelPoolCfg: &grpc_gcp.ChannelPoolConfig{
-			MaxSize:                          10,
-			MaxConcurrentStreamsLowWatermark: 100,
+		poolCfg: &poolConfig{
+			maxConn:   10,
+			maxStream: 100,
 		},
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)

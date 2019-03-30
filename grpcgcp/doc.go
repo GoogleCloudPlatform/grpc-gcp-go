@@ -20,6 +20,8 @@
 Package grpcgcp provides grpc supports for Google Cloud APIs.
 For now it provides connection management with affinity support.
 
+Note: "channel" is analagous to "connection" in our context.
+
 Usage:
 
 1. First, initialize the api configuration. There are two ways:
@@ -105,7 +107,7 @@ Usage:
 
 	conn, err := grpc.Dial(
 		target,
-		// Following are channel management options:
+		// Register and specify the grpc-gcp load balancer.
 		grpc.WithBalancerName("grpc_gcp"),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
