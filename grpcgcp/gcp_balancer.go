@@ -124,6 +124,14 @@ type subConnRef struct {
 	streamsCnt  int32 // Keeps track of the number of streams opened on the subConn
 }
 
+func (ref *subConnRef) getAffinityCnt() int32 {
+	return atomic.LoadInt32(&ref.affinityCnt)
+}
+
+func (ref *subConnRef) getStreamsCnt() int32 {
+	return atomic.LoadInt32(&ref.streamsCnt)
+}
+
 func (ref *subConnRef) affinityIncr() {
 	atomic.AddInt32(&ref.affinityCnt, 1)
 }
@@ -248,7 +256,7 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 	boundSC, ok := gb.affinityMap[boundKey]
 	if ok {
 		gb.scRefs[boundSC].affinityDecr()
-		if gb.scRefs[boundSC].affinityCnt <= 0 {
+		if gb.scRefs[boundSC].getAffinityCnt() <= 0 {
 			delete(gb.affinityMap, boundKey)
 		}
 	}

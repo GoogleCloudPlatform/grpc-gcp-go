@@ -117,11 +117,11 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	}
 
 	sort.Slice(p.scRefs, func(i, j int) bool {
-		return p.scRefs[i].streamsCnt < p.scRefs[j].streamsCnt
+		return p.scRefs[i].getStreamsCnt() < p.scRefs[j].getStreamsCnt()
 	})
 
 	// If the least busy connection still has capacity, use it
-	if len(p.scRefs) > 0 && p.scRefs[0].streamsCnt < int32(p.poolCfg.maxStream) {
+	if len(p.scRefs) > 0 && p.scRefs[0].getStreamsCnt() < int32(p.poolCfg.maxStream) {
 		return p.scRefs[0], nil
 	}
 

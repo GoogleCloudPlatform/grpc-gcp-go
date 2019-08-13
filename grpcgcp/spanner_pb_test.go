@@ -208,8 +208,8 @@ func TestOneStream(t *testing.T) {
 	}
 
 	refs := getSubconnRefs()
-	if refs[0].streamsCnt != 1 {
-		t.Errorf("streamsCnt should be 1 after ExecuteStreamingSql, got %v", refs[0].streamsCnt)
+	if refs[0].getStreamsCnt() != 1 {
+		t.Errorf("streamsCnt should be 1 after ExecuteStreamingSql, got %v", refs[0].getStreamsCnt())
 	}
 
 	partial, err := stream.Recv()
@@ -224,8 +224,8 @@ func TestOneStream(t *testing.T) {
 		t.Errorf("Expected io.EOF, got %v", err)
 	}
 
-	if refs[0].streamsCnt != 0 {
-		t.Errorf("streamsCnt should be 0 after stream.Recv(), got %v", refs[0].streamsCnt)
+	if refs[0].getStreamsCnt() != 0 {
+		t.Errorf("streamsCnt should be 0 after stream.Recv(), got %v", refs[0].getStreamsCnt())
 	}
 
 	deleteSession(t, client, sessionName)
@@ -252,8 +252,8 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 		}
 	}
 	refs := getSubconnRefs()
-	if refs[0].streamsCnt != int32(numStreams) {
-		t.Errorf("streamsCnt should be %v, got %v", numStreams, refs[0].streamsCnt)
+	if refs[0].getStreamsCnt() != int32(numStreams) {
+		t.Errorf("streamsCnt should be %v, got %v", numStreams, refs[0].getStreamsCnt())
 	}
 
 	for _, stream := range streams {
@@ -269,8 +269,8 @@ func TestMultipleStreamsInSameSession(t *testing.T) {
 			t.Errorf("Expected io.EOF, got %v", err)
 		}
 	}
-	if refs[0].streamsCnt != 0 {
-		t.Errorf("streamsCnt should be 0, got %v", refs[0].streamsCnt)
+	if refs[0].getStreamsCnt() != 0 {
+		t.Errorf("streamsCnt should be 0, got %v", refs[0].getStreamsCnt())
 	}
 
 	deleteSession(t, client, sessionName)
@@ -304,11 +304,11 @@ func TestMultipleSessions(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 1 {
-			t.Errorf("Each subconn should have 1 stream, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 1 {
+			t.Errorf("Each subconn should have 1 stream, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 1 {
-			t.Errorf("Each subconn should have 1 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 1 {
+			t.Errorf("Each subconn should have 1 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 
@@ -330,11 +330,11 @@ func TestMultipleSessions(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 0 {
-			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 1 {
-			t.Errorf("Each subconn should have 1 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 1 {
+			t.Errorf("Each subconn should have 1 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 
@@ -345,11 +345,11 @@ func TestMultipleSessions(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", numStreams, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 0 {
-			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 0 {
-			t.Errorf("Each subconn should have 0 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 0 {
+			t.Errorf("Each subconn should have 0 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 }
@@ -382,11 +382,11 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 2 {
-			t.Errorf("Each subconn should have 2 streams, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 2 {
+			t.Errorf("Each subconn should have 2 streams, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 2 {
-			t.Errorf("Each subconn should have 2 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 2 {
+			t.Errorf("Each subconn should have 2 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 
@@ -407,11 +407,11 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 0 {
-			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 2 {
-			t.Errorf("Each subconn should have 2 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 2 {
+			t.Errorf("Each subconn should have 2 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 
@@ -422,11 +422,11 @@ func TestChannelPoolMaxSize(t *testing.T) {
 		t.Errorf("Number of subconns should be %v, got %v", maxSize, len(refs))
 	}
 	for _, ref := range refs {
-		if ref.streamsCnt != 0 {
-			t.Errorf("Each subconn should have 0 stream, got %v", ref.streamsCnt)
+		if ref.getStreamsCnt() != 0 {
+			t.Errorf("Each subconn should have 0 stream, got %v", ref.getStreamsCnt())
 		}
-		if ref.affinityCnt != 0 {
-			t.Errorf("Each subconn should have 0 affinity, got %v", ref.affinityCnt)
+		if ref.getAffinityCnt() != 0 {
+			t.Errorf("Each subconn should have 0 affinity, got %v", ref.getAffinityCnt())
 		}
 	}
 }
