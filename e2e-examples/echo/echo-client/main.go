@@ -55,7 +55,7 @@ func main() {
 
 	client := pb.NewGrpcCloudapiClient(conn)
 	msg := strings.Repeat("x", *reqSize*1024)
-	req := &pb.EchoWithResponseSizeRequest{EchoMsg: msg, ResponseSize: int32(*rspSize)}
+	req := &pb.EchoWithResponseSizeRequest{EchoMsg: msg, ResponseSize: int32(*rspSize * 1024)}
 
 	// begin warmup calls
 	for i := 0; i < *warmup; i++ {
