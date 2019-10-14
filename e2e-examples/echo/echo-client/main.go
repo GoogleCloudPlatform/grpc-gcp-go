@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/e2e-examples/echo/echo"
@@ -19,6 +20,7 @@ var (
 	warmup  = flag.Int("warmup", 5, "number of warmup calls before test")
 	rspSize = flag.Int("rspSize", 1, "response size in KB")
 	reqSize = flag.Int("reqSize", 1, "request size in KB")
+	async   = flag.Bool("async", false, "use async echo calls")
 )
 
 func printRsts(numRpcs int, rspSize int, reqSize int, rsts []int) {
@@ -67,15 +69,31 @@ func main() {
 
 	rsts := []int{}
 
-	// begin tests
-	for i := 0; i < *numRpcs; i++ {
-		start := time.Now()
-		_, err := client.EchoWithResponseSize(context.Background(), req)
-		if err != nil {
-			log.Fatalf("EchoWithResponseSize failed with error: %v", err)
+	if !*async {
+		// begin tests
+		for i := 0; i < *numRpcs; i++ {
+			start := time.Now()
+			_, err := client.EchoWithResponseSize(context.Background(), req)
+			if err != nil {
+				log.Fatalf("EchoWithResponseSize failed with error: %v", err)
+			}
+			rsts = append(rsts, int(time.Since(start).Milliseconds()))
 		}
-		rsts = append(rsts, int(time.Since(start).Milliseconds()))
-	}
-	printRsts(*numRpcs, *rspSize, *reqSize, rsts)
+		printRsts(*numRpcs, *rspSize, *reqSize, rsts)
+	} else {
+		var wg sync.WaitGroup
+		wg.Add(*numRpcs)
 
+		for i := 0; i < *numRpcs; i++ {
+			go func(r *pb.EchoWithResponseSizeRequest, n int) {
+				defer wg.Done()
+				_, err := client.EchoWithResponseSize(context.Background(), r)
+				if err != nil {
+					log.Fatalf("EchoWithResponseSize failed with error: %v", err)
+				}
+				log.Printf("Done %vth request", n)
+			}(req, i)
+		}
+		wg.Wait()
+	}
 }
