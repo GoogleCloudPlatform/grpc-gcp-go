@@ -135,6 +135,12 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 ) (grpc.ClientStream, error) {
 	// This constructor does not create a real ClientStream,
 	// it only stores all parameters and let SendMsg() to create ClientStream.
+	affinityCfg, _ := gcpInt.methodToAffinity[method]
+	gcpCtx := &gcpContext{
+		affinityCfg: affinityCfg,
+		poolCfg:     gcpInt.poolCfg,
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 	cs := &gcpClientStream{
 		gcpInt:   gcpInt,
 		ctx:      ctx,
