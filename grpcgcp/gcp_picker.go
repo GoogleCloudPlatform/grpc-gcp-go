@@ -44,13 +44,6 @@ type gcpPicker struct {
 	poolCfg     *poolConfig
 }
 
-//Pick(info PickInfo) (PickResult, error)
-//
-//func (p *gcpPicker) Pick(
-//	ctx context.Context,
-//	opts balancer.PickOptions,
-//) (balancer.SubConn, func(balancer.DoneInfo), error) {
-
 func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if len(p.scRefs) <= 0 {
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable

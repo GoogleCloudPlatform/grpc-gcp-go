@@ -152,10 +152,11 @@ func (ref *subConnRef) streamsDecr() {
 
 type gcpBalancer struct {
 	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
-	addrs             []resolver.Address
-	cc                balancer.ClientConn
-	csEvltr           *connectivityStateEvaluator
-	state             connectivity.State
+
+	addrs   []resolver.Address
+	cc      balancer.ClientConn
+	csEvltr *connectivityStateEvaluator
+	state   connectivity.State
 
 	mu          sync.Mutex
 	affinityMap map[string]balancer.SubConn
@@ -165,16 +166,8 @@ type gcpBalancer struct {
 	picker balancer.V2Picker
 }
 
-//func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
 	addrs := ccs.ResolverState.Addresses
-	//if err := ccs.ResolverState.ServiceConfig.Err; err != nil {
-	//	grpclog.Infof(
-	//		"grpcgcp.gcpBalancer: HandleResolvedAddrs called with error %v",
-	//		err,
-	//	)
-	//	return err
-	//}
 	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
@@ -296,7 +289,6 @@ func (gb *gcpBalancer) regeneratePicker() {
 	gb.picker = newGCPPicker(readyRefs, gb)
 }
 
-//func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
 func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubConnState) {
 	s := scs.ConnectivityState
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
