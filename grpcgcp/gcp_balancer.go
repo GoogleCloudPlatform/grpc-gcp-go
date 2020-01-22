@@ -29,6 +29,8 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
+var _ balancer.V2Balancer = &gcpBalancer{} // Ensure gcpBalancer implements V2Balancer
+
 const (
 	// Name is the name of grpc_gcp balancer.
 	Name = "grpc_gcp"
@@ -149,6 +151,8 @@ func (ref *subConnRef) streamsDecr() {
 }
 
 type gcpBalancer struct {
+	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
+
 	addrs   []resolver.Address
 	cc      balancer.ClientConn
 	csEvltr *connectivityStateEvaluator
@@ -159,23 +163,17 @@ type gcpBalancer struct {
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker balancer.Picker
+	picker balancer.V2Picker
 }
 
-func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
-	if err != nil {
-		grpclog.Infof(
-			"grpcgcp.gcpBalancer: HandleResolvedAddrs called with error %v",
-			err,
-		)
-		return
-	}
+func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
+	addrs := ccs.ResolverState.Addresses
 	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
 	if len(gb.scRefs) == 0 {
 		gb.newSubConn()
-		return
+		return nil
 	}
 
 	for _, scRef := range gb.scRefs {
@@ -183,6 +181,15 @@ func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) 
 		scRef.subConn.UpdateAddresses(addrs)
 		scRef.subConn.Connect()
 	}
+
+	return nil
+}
+
+func (gb *gcpBalancer) ResolverError(err error) {
+	grpclog.Warningf(
+		"grpcgcp.gcpBalancer: ResolverError: %v",
+		err,
+	)
 }
 
 // check current connection pool size
@@ -282,7 +289,8 @@ func (gb *gcpBalancer) regeneratePicker() {
 	gb.picker = newGCPPicker(readyRefs, gb)
 }
 
-func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
+func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubConnState) {
+	s := scs.ConnectivityState
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 
 	gb.mu.Lock()
@@ -317,7 +325,10 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 	if (s == connectivity.Ready) != (oldS == connectivity.Ready) ||
 		(gb.state == connectivity.TransientFailure) != (oldAggrState == connectivity.TransientFailure) {
 		gb.regeneratePicker()
-		gb.cc.UpdateBalancerState(gb.state, gb.picker)
+		gb.cc.UpdateState(balancer.State{
+			ConnectivityState: gb.state,
+			Picker:            gb.picker,
+		})
 	}
 }
 
