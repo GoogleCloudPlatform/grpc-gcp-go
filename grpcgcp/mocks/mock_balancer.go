@@ -63,7 +63,7 @@ func (mr *MockClientConnMockRecorder) RemoveSubConn(arg0 interface{}) *gomock.Ca
 }
 
 // ResolveNow mocks base method
-func (m *MockClientConn) ResolveNow(arg0 resolver.ResolveNowOption) {
+func (m *MockClientConn) ResolveNow(arg0 resolver.ResolveNowOptions) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "ResolveNow", arg0)
 }
@@ -98,6 +98,18 @@ func (m *MockClientConn) UpdateBalancerState(arg0 connectivity.State, arg1 balan
 func (mr *MockClientConnMockRecorder) UpdateBalancerState(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateBalancerState", reflect.TypeOf((*MockClientConn)(nil).UpdateBalancerState), arg0, arg1)
+}
+
+// UpdateState mocks base method
+func (m *MockClientConn) UpdateState(arg0 balancer.State) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UpdateState", arg0)
+}
+
+// UpdateState indicates an expected call of UpdateState
+func (mr *MockClientConnMockRecorder) UpdateState(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateState", reflect.TypeOf((*MockClientConn)(nil).UpdateState), arg0)
 }
 
 // MockSubConn is a mock of SubConn interface

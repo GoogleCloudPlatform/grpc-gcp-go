@@ -114,22 +114,22 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 
 	okSC := mocks.NewMockSubConn(mockCtrl)
 	var scRefs = []*subConnRef{
-		&subConnRef{
+		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  1,
 		},
-		&subConnRef{
+		{
 			subConn:     okSC,
 			affinityCnt: 0,
 			streamsCnt:  0,
 		},
-		&subConnRef{
+		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  3,
 		},
-		&subConnRef{
+		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
 			affinityCnt: 0,
 			streamsCnt:  5,
@@ -147,7 +147,8 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 
-	sc, _, err := picker.Pick(ctx, balancer.PickOptions{})
+	pr, err := picker.Pick(balancer.PickInfo{"", ctx})
+	sc := pr.SubConn
 
 	if err != nil {
 		t.Fatalf("gcpPicker.Pick returns err: %v", err)
@@ -163,7 +164,7 @@ func TestPickNewSubConn(t *testing.T) {
 
 	mockSC := mocks.NewMockSubConn(mockCtrl)
 	var scRefs = []*subConnRef{
-		&subConnRef{
+		{
 			subConn:     mockSC,
 			affinityCnt: 0,
 			streamsCnt:  100,
@@ -194,7 +195,8 @@ func TestPickNewSubConn(t *testing.T) {
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 
-	sc, _, err := picker.Pick(ctx, balancer.PickOptions{})
+	pr, err := picker.Pick(balancer.PickInfo{"", ctx})
+	sc := pr.SubConn
 
 	wantErr := balancer.ErrNoSubConnAvailable
 	if sc != nil || err != wantErr {
