@@ -124,13 +124,13 @@ func makeGrpcRequest(client gcspb.StorageClient) []int {
 			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
 
+		start := time.Now()
 		stream, err := client.GetObjectMedia(ctx, &req)
 		if err != nil {
 			fmt.Println("GetObjectMedia got error: ", err)
 			os.Exit(1)
 		}
 
-		start := time.Now()
 		for {
 			_, err := stream.Recv()
 			if err == io.EOF {
