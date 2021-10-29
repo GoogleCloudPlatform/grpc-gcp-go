@@ -25,19 +25,17 @@ import (
 	"sync"
 	"testing"
 
-	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+
+	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 )
 
 const (
-	target         = "spanner.googleapis.com:443"
-	scope          = "https://www.googleapis.com/auth/cloud-platform"
-	database       = "projects/grpc-gcp/instances/sample/databases/benchmark"
-	testSQL        = "select id from storage"
-	testColumnData = "payload"
+	target = "spanner.googleapis.com:443"
+	scope  = "https://www.googleapis.com/auth/cloud-platform"
 )
 
 var currBalancer *gcpBalancer
