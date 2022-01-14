@@ -1,3 +1,12 @@
+## Regenerating protos
+
+```sh
+git clone git@github.com:googleapis/googleapis.git
+cd googleapis
+protoc --go_out=plugins=grpc:.. google/storage/v1/*.proto
+cd ..
+```
+
 ## Example commands
 
 Use grpc API for reading a gcs object through CFE:
