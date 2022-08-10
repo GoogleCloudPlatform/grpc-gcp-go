@@ -47,6 +47,7 @@ import (
 
 var (
 	randId, _           = rand.Int(rand.Reader, big.NewInt(900000))
+	skipSpanner         = os.Getenv("SKIP_SPANNER")
 	gcpProjectId        = os.Getenv("GCP_PROJECT_ID")
 	spannerInstanceId   = "test-instance-" + strconv.FormatInt(100000+randId.Int64(), 10)
 	spannerInstancePath = fmt.Sprintf("projects/%s/instances/%s", gcpProjectId, spannerInstanceId)
@@ -73,6 +74,10 @@ func TestMain(m *testing.M) {
 
 func setup() error {
 	fmt.Println("Setup started.")
+	if skipSpanner != "" {
+		fmt.Println("Setup skipped.")
+		return nil
+	}
 	if gcpProjectId == "" {
 		panic("GCP_PROJECT_ID env variable is empty. Please provide a valid GCP_PROJECT_ID.")
 	}
@@ -104,6 +109,10 @@ func setup() error {
 
 func teardown() {
 	fmt.Println("Teardown started.")
+	if skipSpanner != "" {
+		fmt.Println("Teardown skipped.")
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*setupTimeoutSec)
 	defer cancel()
 	fmt.Printf("Dropping Spanner instance %s...\n", spannerInstancePath)

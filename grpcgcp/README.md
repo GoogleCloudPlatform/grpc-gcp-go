@@ -1,5 +1,5 @@
 
-## How to test
+## How to test Spanner integration
 
 1. Set GCP project id with GCP_PROJECT_ID environment variable.
 
@@ -11,4 +11,8 @@
 
 1. Run the tests.
 
-        go test
+        go test -v
+
+To skip Spanner setup run
+
+        SKIP_SPANNER=true go test -v
