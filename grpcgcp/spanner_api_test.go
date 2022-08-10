@@ -34,15 +34,12 @@ import (
 	"cloud.google.com/go/spanner"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	dbapi "cloud.google.com/go/spanner/admin/database/apiv1"
 	instapi "cloud.google.com/go/spanner/admin/instance/apiv1"
-	cliapi "cloud.google.com/go/spanner/apiv1"
 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	apb "google.golang.org/genproto/googleapis/spanner/admin/database/v1"
 	ipb "google.golang.org/genproto/googleapis/spanner/admin/instance/v1"
-	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 )
 
 var (
@@ -199,37 +196,13 @@ func createTestDatabase(ctx context.Context, db string) error {
 }
 
 func insertTestRecord(ctx context.Context) error {
-	client, err := cliapi.NewClient(ctx)
+	client, err := spanner.NewClient(ctx, database)
+	defer client.Close()
 	if err != nil {
 		return err
 	}
-
-	session, err := client.CreateSession(ctx, &sppb.CreateSessionRequest{
-		Database: database,
-	})
-	if err != nil {
-		return err
-	}
-
-	_, err = client.Commit(context.Background(), &sppb.CommitRequest{
-		Session: session.Name,
-		Transaction: &sppb.CommitRequest_SingleUseTransaction{
-			SingleUseTransaction: &sppb.TransactionOptions{
-				Mode: &sppb.TransactionOptions_ReadWrite_{},
-			},
-		},
-		Mutations: []*sppb.Mutation{
-			{
-				Operation: &sppb.Mutation_InsertOrUpdate{
-					InsertOrUpdate: &sppb.Mutation_Write{
-						Table:   tableName,
-						Columns: []string{column},
-						Values:  []*structpb.ListValue{{Values: []*structpb.Value{structpb.NewStringValue(testColumnData)}}},
-					},
-				},
-			},
-		},
-	})
+	m := spanner.InsertOrUpdate(tableName, []string{column}, []interface{}{testColumnData})
+	_, err = client.Apply(ctx, []*spanner.Mutation{m})
 	return err
 }
 
