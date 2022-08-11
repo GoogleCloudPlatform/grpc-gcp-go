@@ -202,3 +202,31 @@ func TestStreamingCall(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamingCallNoResponse(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			conn, err := getConn(test.apicfg)
+			if err != nil {
+				t.Fatalf("did not connect: %v", err)
+			}
+			defer conn.Close()
+			c := pb.NewGreeterClient(conn)
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			rhc, err := c.InterruptedHello(ctx)
+			if err != nil {
+				t.Fatalf("could not start stream for InterruptedHello: %v", err)
+			}
+
+			rhc.Send(&pb.HelloRequest{Name: "stream"})
+
+			_, err = rhc.Recv()
+			wantErr := "EOF"
+			if err == nil || err.Error() != wantErr {
+				t.Fatalf("Recv() got err %v, want err %v", err, wantErr)
+			}
+		})
+	}
+}

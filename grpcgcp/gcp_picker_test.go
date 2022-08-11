@@ -78,6 +78,14 @@ func TestGetNestedKeyFromMessage(t *testing.T) {
 	}
 }
 
+func TestGetKeyFromNilMessage(t *testing.T) {
+	expectedErr := fmt.Sprintf("cannot get string value from nil message")
+	_, err := getAffinityKeyFromMessage("key", nil)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+}
+
 func TestInvalidKeyLocator(t *testing.T) {
 	msg := &testMsg{
 		Key: "test_key",
