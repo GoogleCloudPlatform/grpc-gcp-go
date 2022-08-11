@@ -135,6 +135,12 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 ) (grpc.ClientStream, error) {
 	// This constructor does not create a real ClientStream,
 	// it only stores all parameters and let SendMsg() to create ClientStream.
+	affinityCfg, _ := gcpInt.methodToAffinity[method]
+	gcpCtx := &gcpContext{
+		affinityCfg: affinityCfg,
+		poolCfg:     gcpInt.poolCfg,
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 	cs := &gcpClientStream{
 		gcpInt:   gcpInt,
 		ctx:      ctx,
@@ -167,16 +173,12 @@ func (cs *gcpClientStream) SendMsg(m interface{}) error {
 	cs.Lock()
 	// Initialize underlying ClientStream when getting the first request.
 	if cs.ClientStream == nil {
-		affinityCfg, ok := cs.gcpInt.methodToAffinity[cs.method]
-		ctx := cs.ctx
-		if ok {
-			gcpCtx := &gcpContext{
-				affinityCfg: affinityCfg,
-				reqMsg:      m,
-				poolCfg:     cs.gcpInt.poolCfg,
-			}
-			ctx = context.WithValue(cs.ctx, gcpKey, gcpCtx)
+		gcpCtx := &gcpContext{
+			affinityCfg: cs.ctx.Value(gcpKey).(*gcpContext).affinityCfg,
+			reqMsg:      m,
+			poolCfg:     cs.gcpInt.poolCfg,
 		}
+		ctx := context.WithValue(cs.ctx, gcpKey, gcpCtx)
 		realCS, err := cs.streamer(ctx, cs.desc, cs.cc, cs.method, cs.opts...)
 		if err != nil {
 			cs.initStreamErr = err
