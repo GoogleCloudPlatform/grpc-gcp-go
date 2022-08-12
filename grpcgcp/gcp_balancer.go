@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
-var _ balancer.V2Balancer = &gcpBalancer{} // Ensure gcpBalancer implements V2Balancer
+var _ balancer.Balancer = &gcpBalancer{} // Ensure gcpBalancer implements Balancer
 
 const (
 	// Name is the name of grpc_gcp balancer.
@@ -163,7 +163,7 @@ type gcpBalancer struct {
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker balancer.V2Picker
+	picker balancer.Picker
 }
 
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
@@ -271,8 +271,8 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 
 // regeneratePicker takes a snapshot of the balancer, and generates a picker
 // from it. The picker is
-//  - errPicker with ErrTransientFailure if the balancer is in TransientFailure,
-//  - built by the pickerBuilder with all READY SubConns otherwise.
+//   - errPicker with ErrTransientFailure if the balancer is in TransientFailure,
+//   - built by the pickerBuilder with all READY SubConns otherwise.
 func (gb *gcpBalancer) regeneratePicker() {
 	if gb.state == connectivity.TransientFailure {
 		gb.picker = newErrPicker(balancer.ErrTransientFailure)

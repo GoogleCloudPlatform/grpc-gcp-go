@@ -3,17 +3,10 @@ module github.com/GoogleCloudPlatform/grpc-gcp-go
 go 1.12
 
 require (
-	cloud.google.com/go/bigquery v1.3.0 // indirect
-	cloud.google.com/go/datastore v1.0.0
 	cloud.google.com/go/spanner v1.1.0
-	github.com/golang/mock v1.3.1
-	github.com/golang/protobuf v1.4.3
-	github.com/hashicorp/golang-lru v0.5.3 // indirect
-	golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7 // indirect
-	golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a // indirect
-	golang.org/x/tools v0.0.0-20200121230703-78d067421b02 // indirect
-	google.golang.org/api v0.13.0
-	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013
-	google.golang.org/grpc v1.27.1
-	google.golang.org/protobuf v1.24.0
+	github.com/golang/mock v1.5.0
+	google.golang.org/api v0.47.0
+	google.golang.org/genproto v0.0.0-20210513213006-bf773b8c8384
+	google.golang.org/grpc v1.37.1
+	google.golang.org/protobuf v1.27.1
 )

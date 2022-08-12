@@ -5,37 +5,37 @@
 package mocks
 
 import (
+	reflect "reflect"
+
 	gomock "github.com/golang/mock/gomock"
 	balancer "google.golang.org/grpc/balancer"
-	connectivity "google.golang.org/grpc/connectivity"
 	resolver "google.golang.org/grpc/resolver"
-	reflect "reflect"
 )
 
-// MockClientConn is a mock of ClientConn interface
+// MockClientConn is a mock of ClientConn interface.
 type MockClientConn struct {
 	ctrl     *gomock.Controller
 	recorder *MockClientConnMockRecorder
 }
 
-// MockClientConnMockRecorder is the mock recorder for MockClientConn
+// MockClientConnMockRecorder is the mock recorder for MockClientConn.
 type MockClientConnMockRecorder struct {
 	mock *MockClientConn
 }
 
-// NewMockClientConn creates a new mock instance
+// NewMockClientConn creates a new mock instance.
 func NewMockClientConn(ctrl *gomock.Controller) *MockClientConn {
 	mock := &MockClientConn{ctrl: ctrl}
 	mock.recorder = &MockClientConnMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use
+// EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockClientConn) EXPECT() *MockClientConnMockRecorder {
 	return m.recorder
 }
 
-// NewSubConn mocks base method
+// NewSubConn mocks base method.
 func (m *MockClientConn) NewSubConn(arg0 []resolver.Address, arg1 balancer.NewSubConnOptions) (balancer.SubConn, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "NewSubConn", arg0, arg1)
@@ -44,37 +44,37 @@ func (m *MockClientConn) NewSubConn(arg0 []resolver.Address, arg1 balancer.NewSu
 	return ret0, ret1
 }
 
-// NewSubConn indicates an expected call of NewSubConn
+// NewSubConn indicates an expected call of NewSubConn.
 func (mr *MockClientConnMockRecorder) NewSubConn(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewSubConn", reflect.TypeOf((*MockClientConn)(nil).NewSubConn), arg0, arg1)
 }
 
-// RemoveSubConn mocks base method
+// RemoveSubConn mocks base method.
 func (m *MockClientConn) RemoveSubConn(arg0 balancer.SubConn) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "RemoveSubConn", arg0)
 }
 
-// RemoveSubConn indicates an expected call of RemoveSubConn
+// RemoveSubConn indicates an expected call of RemoveSubConn.
 func (mr *MockClientConnMockRecorder) RemoveSubConn(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveSubConn", reflect.TypeOf((*MockClientConn)(nil).RemoveSubConn), arg0)
 }
 
-// ResolveNow mocks base method
+// ResolveNow mocks base method.
 func (m *MockClientConn) ResolveNow(arg0 resolver.ResolveNowOptions) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "ResolveNow", arg0)
 }
 
-// ResolveNow indicates an expected call of ResolveNow
+// ResolveNow indicates an expected call of ResolveNow.
 func (mr *MockClientConnMockRecorder) ResolveNow(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveNow", reflect.TypeOf((*MockClientConn)(nil).ResolveNow), arg0)
 }
 
-// Target mocks base method
+// Target mocks base method.
 func (m *MockClientConn) Target() string {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Target")
@@ -82,78 +82,78 @@ func (m *MockClientConn) Target() string {
 	return ret0
 }
 
-// Target indicates an expected call of Target
+// Target indicates an expected call of Target.
 func (mr *MockClientConnMockRecorder) Target() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Target", reflect.TypeOf((*MockClientConn)(nil).Target))
 }
 
-// UpdateBalancerState mocks base method
-func (m *MockClientConn) UpdateBalancerState(arg0 connectivity.State, arg1 balancer.Picker) {
+// UpdateAddresses mocks base method.
+func (m *MockClientConn) UpdateAddresses(arg0 balancer.SubConn, arg1 []resolver.Address) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdateBalancerState", arg0, arg1)
+	m.ctrl.Call(m, "UpdateAddresses", arg0, arg1)
 }
 
-// UpdateBalancerState indicates an expected call of UpdateBalancerState
-func (mr *MockClientConnMockRecorder) UpdateBalancerState(arg0, arg1 interface{}) *gomock.Call {
+// UpdateAddresses indicates an expected call of UpdateAddresses.
+func (mr *MockClientConnMockRecorder) UpdateAddresses(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateBalancerState", reflect.TypeOf((*MockClientConn)(nil).UpdateBalancerState), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAddresses", reflect.TypeOf((*MockClientConn)(nil).UpdateAddresses), arg0, arg1)
 }
 
-// UpdateState mocks base method
+// UpdateState mocks base method.
 func (m *MockClientConn) UpdateState(arg0 balancer.State) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "UpdateState", arg0)
 }
 
-// UpdateState indicates an expected call of UpdateState
+// UpdateState indicates an expected call of UpdateState.
 func (mr *MockClientConnMockRecorder) UpdateState(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateState", reflect.TypeOf((*MockClientConn)(nil).UpdateState), arg0)
 }
 
-// MockSubConn is a mock of SubConn interface
+// MockSubConn is a mock of SubConn interface.
 type MockSubConn struct {
 	ctrl     *gomock.Controller
 	recorder *MockSubConnMockRecorder
 }
 
-// MockSubConnMockRecorder is the mock recorder for MockSubConn
+// MockSubConnMockRecorder is the mock recorder for MockSubConn.
 type MockSubConnMockRecorder struct {
 	mock *MockSubConn
 }
 
-// NewMockSubConn creates a new mock instance
+// NewMockSubConn creates a new mock instance.
 func NewMockSubConn(ctrl *gomock.Controller) *MockSubConn {
 	mock := &MockSubConn{ctrl: ctrl}
 	mock.recorder = &MockSubConnMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use
+// EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockSubConn) EXPECT() *MockSubConnMockRecorder {
 	return m.recorder
 }
 
-// Connect mocks base method
+// Connect mocks base method.
 func (m *MockSubConn) Connect() {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "Connect")
 }
 
-// Connect indicates an expected call of Connect
+// Connect indicates an expected call of Connect.
 func (mr *MockSubConnMockRecorder) Connect() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Connect", reflect.TypeOf((*MockSubConn)(nil).Connect))
 }
 
-// UpdateAddresses mocks base method
+// UpdateAddresses mocks base method.
 func (m *MockSubConn) UpdateAddresses(arg0 []resolver.Address) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "UpdateAddresses", arg0)
 }
 
-// UpdateAddresses indicates an expected call of UpdateAddresses
+// UpdateAddresses indicates an expected call of UpdateAddresses.
 func (mr *MockSubConnMockRecorder) UpdateAddresses(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAddresses", reflect.TypeOf((*MockSubConn)(nil).UpdateAddresses), arg0)
