@@ -1,4 +1,5 @@
 steps:
 - name: golang:1.19
+  dir: 'grpcgcp'
   entrypoint: go
   args: ['test', '-v', '-timeout', '600s']
