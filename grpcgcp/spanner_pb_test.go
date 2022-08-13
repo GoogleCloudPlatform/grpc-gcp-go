@@ -21,14 +21,12 @@ package grpcgcp
 import (
 	"context"
 	"io"
-	"os"
 	"sync"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/oauth"
 
 	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 )
@@ -60,11 +58,11 @@ func (*testBuilderWrapper) Name() string {
 }
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
-	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
-	if err != nil {
-		t.Fatalf("Failed to create credentials: %v", err)
-	}
+	// keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	// perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
+	// if err != nil {
+	// 	t.Fatalf("Failed to create credentials: %v", err)
+	// }
 	apiConfig, err := ParseAPIConfig("spanner.grpc.config")
 	if err != nil {
 		t.Fatalf("Failed to parse api config file: %v", err)
@@ -82,7 +80,7 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	conn, err := grpc.Dial(
 		target,
 		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
-		grpc.WithPerRPCCredentials(perRPC),
+		// grpc.WithPerRPCCredentials(perRPC),
 		grpc.WithBalancerName(Name),
 		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
 		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
