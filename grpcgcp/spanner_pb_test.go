@@ -60,8 +60,14 @@ func (*testBuilderWrapper) Name() string {
 }
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
+	var perRPC credentials.PerRPCCredentials
+	var err error
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
+	if keyFile == "" {
+		perRPC, err = oauth.NewApplicationDefault(context.Background(), scope)
+	} else {
+		perRPC, err = oauth.NewServiceAccountFromFile(keyFile, scope)
+	}
 	if err != nil {
 		t.Fatalf("Failed to create credentials: %v", err)
 	}
