@@ -1,7 +1,7 @@
 steps:
 - name: golang:1.19
-  entrypoint: env
-- name: golang:1.19
   dir: 'grpcgcp'
+  env:
+  - 'GCP_PROJECT_ID=grpc-gcp-testing'
   entrypoint: go
   args: ['test', '-v', '-timeout', '600s']
