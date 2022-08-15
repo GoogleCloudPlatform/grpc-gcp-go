@@ -25,19 +25,17 @@ import (
 	"sync"
 	"testing"
 
-	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+
+	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 )
 
 const (
-	target         = "spanner.googleapis.com:443"
-	scope          = "https://www.googleapis.com/auth/cloud-platform"
-	database       = "projects/grpc-gcp/instances/sample/databases/benchmark"
-	testSQL        = "select id from storage"
-	testColumnData = "payload"
+	target = "spanner.googleapis.com:443"
+	scope  = "https://www.googleapis.com/auth/cloud-platform"
 )
 
 var currBalancer *gcpBalancer
@@ -62,8 +60,14 @@ func (*testBuilderWrapper) Name() string {
 }
 
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
+	var perRPC credentials.PerRPCCredentials
+	var err error
 	keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
+	if keyFile == "" {
+		perRPC, err = oauth.NewApplicationDefault(context.Background(), scope)
+	} else {
+		perRPC, err = oauth.NewServiceAccountFromFile(keyFile, scope)
+	}
 	if err != nil {
 		t.Fatalf("Failed to create credentials: %v", err)
 	}
