@@ -20,12 +20,13 @@ package grpcgcp
 
 import (
 	"context"
-	"os"
+	"io/ioutil"
 	"sync"
 
-	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
-	"github.com/golang/protobuf/jsonpb"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
 
 const (
@@ -210,11 +211,11 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 
 // ParseAPIConfig parses a json config file into ApiConfig proto message.
 func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
-	jsonFile, err := os.Open(path)
+	jsonFile, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	result := &pb.ApiConfig{}
-	jsonpb.Unmarshal(jsonFile, result)
+	protojson.Unmarshal(jsonFile, result)
 	return result, nil
 }

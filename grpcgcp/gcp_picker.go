@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/balancer"
 )
 
-func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.V2Picker {
+func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs:      readySCRefs,
@@ -174,7 +174,7 @@ func getAffinityKeyFromMessage(
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().
-func newErrPicker(err error) balancer.V2Picker {
+func newErrPicker(err error) balancer.Picker {
 	return &errPicker{err: err}
 }
 
