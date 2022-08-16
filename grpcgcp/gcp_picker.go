@@ -152,6 +152,9 @@ func getAffinityKeyFromMessage(
 		return "", fmt.Errorf("Empty affinityKey locator")
 	}
 
+	if msg == nil {
+		return "", fmt.Errorf("cannot get string value from nil message")
+	}
 	val := reflect.ValueOf(msg).Elem()
 
 	// Fields in names except for the last one.
