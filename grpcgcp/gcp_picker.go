@@ -33,7 +33,8 @@ func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs:      readySCRefs,
-		poolCfg:     nil,
+		// The pool config is unavailable until Pick is called with a config in the context.
+		poolCfg: nil,
 	}
 }
 
@@ -44,22 +45,25 @@ type gcpPicker struct {
 	poolCfg     *poolConfig
 }
 
+func (p *gcpPicker) initializePoolCfg(poolCfg *poolConfig) {
+	if p.poolCfg == nil && poolCfg != nil {
+		p.poolCfg = poolCfg
+		p.gcpBalancer.enforceMinSize(int(poolCfg.minConn))
+	}
+}
+
 func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if len(p.scRefs) <= 0 {
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	ctx := info.Ctx
 	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 
 	if hasGcpCtx {
-		if p.poolCfg == nil {
-			// Initialize poolConfig for picker.
-			p.poolCfg = gcpCtx.poolCfg
+		if p.poolCfg == nil && gcpCtx.poolCfg != nil {
+			p.initializePoolCfg(gcpCtx.poolCfg)
 		}
 		affinity := gcpCtx.affinityCfg
 		if affinity != nil {
@@ -101,12 +105,15 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		}
 		scRef.streamsDecr()
 	}
-	return balancer.PickResult{scRef.subConn, callback}, nil
+	return balancer.PickResult{SubConn: scRef.subConn, Done: callback}, nil
 }
 
 // getSubConnRef returns the subConnRef object that contains the subconn
 // ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if boundKey != "" {
 		if ref, ok := p.gcpBalancer.getReadySubConnRef(boundKey); ok {
 			return ref, nil
