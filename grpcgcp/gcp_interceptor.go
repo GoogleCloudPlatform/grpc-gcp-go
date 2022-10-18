@@ -33,6 +33,9 @@ const (
 	// Default max number of connections is 0, meaning "no limit"
 	defaultMaxConn = 0
 
+	// Default minimum number of connections.
+	defaultMinConn = 1
+
 	// Default max stream watermark is 100, which is the current stream limit for GFE.
 	// Any value >100 will be rounded down to 100.
 	defaultMaxStream = 100
@@ -44,6 +47,7 @@ var gcpKey key
 
 type poolConfig struct {
 	maxConn   uint32
+	minConn   uint32
 	maxStream uint32
 }
 
@@ -81,6 +85,7 @@ func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
 
 	poolCfg := &poolConfig{
 		maxConn:   defaultMaxConn,
+		minConn:   defaultMinConn,
 		maxStream: defaultMaxStream,
 	}
 
@@ -88,6 +93,11 @@ func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
 
 	// Set user defined MaxSize.
 	poolCfg.maxConn = userPoolCfg.GetMaxSize()
+
+	// Set user defined MinSize.
+	if userPoolCfg.GetMinSize() > 0 {
+		poolCfg.minConn = userPoolCfg.GetMinSize()
+	}
 
 	// Set user defined MaxConcurrentStreamsLowWatermark if ranged in [1, defaultMaxStream],
 	// otherwise use the defaultMaxStream.

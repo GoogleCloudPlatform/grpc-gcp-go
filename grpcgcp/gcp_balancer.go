@@ -166,6 +166,14 @@ type gcpBalancer struct {
 	picker balancer.Picker
 }
 
+func (gb *gcpBalancer) enforceMinSize(minSize int) {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+	for len(gb.scRefs) < minSize {
+		gb.addSubConn()
+	}
+}
+
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
 	addrs := ccs.ResolverState.Addresses
 	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
@@ -199,7 +207,8 @@ func (gb *gcpBalancer) getConnectionPoolSize() int {
 	return len(gb.scRefs)
 }
 
-// newSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
+// newSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef
+// if none of the subconns are in the Connecting state.
 func (gb *gcpBalancer) newSubConn() {
 	gb.mu.Lock()
 	defer gb.mu.Unlock()
@@ -211,7 +220,12 @@ func (gb *gcpBalancer) newSubConn() {
 			return
 		}
 	}
+	gb.addSubConn()
+}
 
+// addSubConn creates a new SubConn using cc.NewSubConn and initialize the subConnRef.
+// Must be called holding the mutex lock.
+func (gb *gcpBalancer) addSubConn() {
 	sc, err := gb.cc.NewSubConn(
 		gb.addrs,
 		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},

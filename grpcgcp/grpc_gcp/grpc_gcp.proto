@@ -45,6 +45,9 @@ message ChannelPoolConfig {
   // Default value is 100. The valid range is [1, 100]. Any value outside the range will be ignored and the default value will be used.
   // Note: It is not recommended that users adjust this value, since a single channel should generally have no trouble managing the default (maximum) number of streams.
   uint32 max_concurrent_streams_low_watermark = 3;
+
+  // The minimum number of channels in the pool.
+  uint32 min_size = 4;
 }
 
 message MethodConfig {
