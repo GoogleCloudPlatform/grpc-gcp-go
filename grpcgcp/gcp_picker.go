@@ -84,6 +84,9 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if err != nil {
 		return balancer.PickResult{}, err
 	}
+	if scRef == nil {
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
+	}
 	scRef.streamsIncr()
 
 	// define callback for post process once call is done
