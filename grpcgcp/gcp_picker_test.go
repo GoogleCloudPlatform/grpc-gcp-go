@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/balancer"
@@ -294,4 +295,84 @@ func TestCreatesMinSubConns(t *testing.T) {
 	}
 }
 
-// TODO(golobokov): add a test for picking a subconn when bound subconn is not ready.
+func TestPickMappedSubConn(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockSCnotmapped := mocks.NewMockSubConn(mockCtrl)
+	mockSCmapped := mocks.NewMockSubConn(mockCtrl)
+	var scRefs = []*subConnRef{
+		{
+			subConn:     mockSCnotmapped,
+			affinityCnt: 0,
+			streamsCnt:  0,
+		},
+		{
+			subConn:     mockSCmapped,
+			affinityCnt: 0,
+			streamsCnt:  5,
+		},
+	}
+
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mp := make(map[balancer.SubConn]*subConnRef)
+	mp[mockSCnotmapped] = scRefs[0]
+	mp[mockSCmapped] = scRefs[1]
+
+	// Simulate a pool with two ready connections.
+	b := &gcpBalancer{
+		cc:          mockCC,
+		scRefs:      mp,
+		scStates:    make(map[balancer.SubConn]connectivity.State),
+		affinityMap: make(map[string]balancer.SubConn),
+	}
+	b.scStates[mockSCnotmapped] = connectivity.Ready
+	b.scStates[mockSCmapped] = connectivity.Ready
+
+	// Prepare the mapping to the connection in the error state as if the key was mapped
+	// before the connection moved to the error state.
+	theKey := "key-for-not-ready"
+	b.affinityMap[theKey] = mockSCmapped
+
+	// Refresh the picker which is done by the balancer when connection state changes.
+	b.regeneratePicker()
+
+	// Prepare call context with the mapped key.
+	ctx := context.Background()
+	gcpCtx := &gcpContext{
+		poolCfg: &poolConfig{
+			maxConn:   10,
+			maxStream: 100,
+		},
+		affinityCfg: &grpc_gcp.AffinityConfig{
+			Command:     grpc_gcp.AffinityConfig_BOUND,
+			AffinityKey: "key",
+		},
+		reqMsg: &testMsg{
+			Key: theKey,
+		},
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	// The mapped connection shoud be returned.
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	sc := pr.SubConn
+
+	if sc != mockSCmapped || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", sc, err, mockSCmapped)
+	}
+
+	// Simulate the mapped connection moved to the error state.
+	b.scStates[mockSCmapped] = connectivity.TransientFailure
+	b.regeneratePicker()
+
+	// The picker should return ErrNoSubConnAvailable because the connection mapped to the key is not
+	// in the ready state.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	sc = pr.SubConn
+
+	wantErr := balancer.ErrNoSubConnAvailable
+	if sc != nil || err != wantErr {
+		t.Fatalf("gcpPicker.Pick returns %v, _, %v, want: nil, _, %v", sc, err, wantErr)
+	}
+}
