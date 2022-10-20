@@ -21,14 +21,17 @@ package grpcgcp
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/resolver"
 )
 
 type testMsg struct {
@@ -368,5 +371,71 @@ func TestPickMappedSubConn(t *testing.T) {
 	wantErr := balancer.ErrNoSubConnAvailable
 	if sc != nil || err != wantErr {
 		t.Fatalf("gcpPicker.Pick returns %v, _, %v, want: nil, _, %v", sc, err, wantErr)
+	}
+}
+
+func BenchmarkPick(b *testing.B) {
+	for _, poolSize := range []int{4, 8, 16, 32, 64} {
+		mockCtrl := gomock.NewController(b)
+
+		mockCC := mocks.NewMockClientConn(mockCtrl)
+		subconns := []*mocks.MockSubConn{}
+		mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+		mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+			newSC := mocks.NewMockSubConn(mockCtrl)
+			newSC.EXPECT().Connect().Times(1)
+			subconns = append(subconns, newSC)
+			return newSC, nil
+		}).Times(poolSize)
+		bal := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+		bal.UpdateClientConnState(balancer.ClientConnState{ResolverState: resolver.State{Addresses: []resolver.Address{{Addr: "127.0.0.1"}}}})
+
+		// Make 1st channel ready.
+		bal.UpdateSubConnState(subconns[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+		ctx := context.Background()
+		gcpCtx := &gcpContext{
+			poolCfg: &poolConfig{
+				maxConn:   uint32(poolSize),
+				minConn:   uint32(poolSize),
+				maxStream: 100,
+			},
+		}
+		ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+		// Initiate other channels.
+		_, _ = bal.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+
+		// Move all subconns to ready state.
+		for _, sc := range subconns {
+			bal.UpdateSubConnState(sc, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+		}
+
+		cwg := sync.WaitGroup{}
+		b.Run(fmt.Sprintf("pool_size_%d", poolSize), func(b *testing.B) {
+			wg := sync.WaitGroup{}
+			n := b.N / poolSize
+
+			// Call Pick concurrently from poolSize parallel jobs.
+			for i := 0; i < poolSize; i++ {
+				wg.Add(1)
+				go func() {
+					for j := 0; j < n; j++ {
+						pr, _ := bal.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+						cwg.Add(1)
+						go func() {
+							time.Sleep((5 + time.Duration(rand.Intn(15))) * time.Millisecond)
+							pr.Done(balancer.DoneInfo{})
+							cwg.Done()
+						}()
+					}
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+		})
+		// Wait for all Done callbacks.
+		cwg.Wait()
+		mockCtrl.Finish()
 	}
 }

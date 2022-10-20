@@ -21,7 +21,6 @@ package grpcgcp
 import (
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 
@@ -114,22 +113,24 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 // getSubConnRef returns the subConnRef object that contains the subconn
 // ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if boundKey != "" {
 		if ref, ok := p.gcpBalancer.getReadySubConnRef(boundKey); ok {
 			return ref, nil
 		}
 	}
 
-	sort.Slice(p.scRefs, func(i, j int) bool {
-		return p.scRefs[i].getStreamsCnt() < p.scRefs[j].getStreamsCnt()
-	})
+	minScRef := p.scRefs[0]
+	minStreamsCnt := minScRef.getStreamsCnt()
+	for _, scRef := range p.scRefs {
+		if scRef.getStreamsCnt() < minStreamsCnt {
+			minStreamsCnt = scRef.getStreamsCnt()
+			minScRef = scRef
+		}
+	}
 
 	// If the least busy connection still has capacity, use it
-	if len(p.scRefs) > 0 && p.scRefs[0].getStreamsCnt() < int32(p.poolCfg.maxStream) {
-		return p.scRefs[0], nil
+	if minStreamsCnt < int32(p.poolCfg.maxStream) {
+		return minScRef, nil
 	}
 
 	if p.poolCfg.maxConn == 0 || p.gcpBalancer.getConnectionPoolSize() < int(p.poolCfg.maxConn) {
@@ -142,13 +143,9 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 		return nil, balancer.ErrNoSubConnAvailable
 	}
 
-	if len(p.scRefs) == 0 {
-		return nil, balancer.ErrNoSubConnAvailable
-	}
-
 	// If no capacity for the pool size and every connection reachs the soft limit,
 	// Then picks the least busy one anyway.
-	return p.scRefs[0], nil
+	return minScRef, nil
 }
 
 // getAffinityKeyFromMessage retrieves the affinity key from proto message using
