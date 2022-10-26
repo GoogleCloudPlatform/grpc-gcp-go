@@ -301,41 +301,33 @@ func TestPickMappedSubConn(t *testing.T) {
 
 	mockSCnotmapped := mocks.NewMockSubConn(mockCtrl)
 	mockSCmapped := mocks.NewMockSubConn(mockCtrl)
-	var scRefs = []*subConnRef{
-		{
-			subConn:     mockSCnotmapped,
-			affinityCnt: 0,
-			streamsCnt:  0,
-		},
-		{
-			subConn:     mockSCmapped,
-			affinityCnt: 0,
-			streamsCnt:  5,
-		},
-	}
-
 	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
 	mp := make(map[balancer.SubConn]*subConnRef)
-	mp[mockSCnotmapped] = scRefs[0]
-	mp[mockSCmapped] = scRefs[1]
-
-	// Simulate a pool with two ready connections.
-	b := &gcpBalancer{
-		cc:          mockCC,
-		scRefs:      mp,
-		scStates:    make(map[balancer.SubConn]connectivity.State),
-		affinityMap: make(map[string]balancer.SubConn),
+	mp[mockSCnotmapped] = &subConnRef{
+		subConn:     mockSCnotmapped,
+		affinityCnt: 0,
+		streamsCnt:  0,
 	}
-	b.scStates[mockSCnotmapped] = connectivity.Ready
-	b.scStates[mockSCmapped] = connectivity.Ready
+	mp[mockSCmapped] = &subConnRef{
+		subConn:     mockSCmapped,
+		affinityCnt: 0,
+		streamsCnt:  5,
+	}
 
-	// Prepare the mapping to the connection in the error state as if the key was mapped
-	// before the connection moved to the error state.
+	// Simulate a pool with two connections.
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	b.scRefs = mp
+	b.scStates[mockSCnotmapped] = connectivity.Idle
+	b.scStates[mockSCmapped] = connectivity.Idle
+
+	// Simulate connections moved to the ready state.
+	b.UpdateSubConnState(mockSCnotmapped, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(mockSCmapped, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// Bind the key to the SubConn.
 	theKey := "key-for-not-ready"
-	b.affinityMap[theKey] = mockSCmapped
-
-	// Refresh the picker which is done by the balancer when connection state changes.
-	b.regeneratePicker()
+	b.bindSubConn(theKey, mockSCmapped)
 
 	// Prepare call context with the mapped key.
 	ctx := context.Background()
@@ -363,11 +355,13 @@ func TestPickMappedSubConn(t *testing.T) {
 	}
 
 	// Simulate the mapped connection moved to the error state.
-	b.scStates[mockSCmapped] = connectivity.TransientFailure
-	b.regeneratePicker()
+	b.UpdateSubConnState(
+		mockSCmapped,
+		balancer.SubConnState{ConnectivityState: connectivity.TransientFailure},
+	)
 
-	// The picker should return ErrNoSubConnAvailable because the connection mapped to the key is not
-	// in the ready state.
+	// The picker should return ErrNoSubConnAvailable for the same context
+	// because the connection mapped to the key is not in the ready state.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
 	sc = pr.SubConn
 
