@@ -374,6 +374,96 @@ func TestPickMappedSubConn(t *testing.T) {
 	}
 }
 
+func TestPickSubConnWithFallback(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	scs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		sc := mocks.NewMockSubConn(mockCtrl)
+		sc.EXPECT().Connect().AnyTimes()
+		scs = append(scs, sc)
+		return sc, nil
+	}).Times(3)
+
+	// Create new pool.
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Init first subconn.
+	b.UpdateClientConnState(balancer.ClientConnState{})
+	// Move it to ready.
+	b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// Prepare call context to bring the pool to 3 subconns.
+	ctx := context.Background()
+	poolCfg := &poolConfig{
+		maxConn:         3,
+		minConn:         3,
+		maxStream:       100,
+		fallbackToReady: true,
+	}
+	gcpCtx := &gcpContext{poolCfg: poolCfg}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	// This first pick will trigger creation of two more new subconns to a total of three.
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	if pr.SubConn == nil || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, scs[0])
+	}
+
+	// Bind the key to the subconn 2, which is not ready.
+	theKey := "key-for-not-ready"
+	b.bindSubConn(theKey, scs[2])
+
+	// Simulate subconn 1 moved to the ready state.
+	b.UpdateSubConnState(scs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// Prepare call context with the mapped key.
+	gcpCtx = &gcpContext{
+		poolCfg: poolCfg,
+		affinityCfg: &grpc_gcp.AffinityConfig{
+			Command:     grpc_gcp.AffinityConfig_BOUND,
+			AffinityKey: "key",
+		},
+		reqMsg: &testMsg{
+			Key: theKey,
+		},
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	// Despite subconn 2 is mapped to the key, subconn 1 shoud be returned as a fallback
+	// because it has less active streams than subconn 0, which has 1 active stream from the previous pick.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	sc := pr.SubConn
+
+	if sc != scs[1] || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", sc, err, scs[1])
+	}
+
+	// Simulate subconn 1 moved to the error state.
+	b.UpdateSubConnState(scs[1], balancer.SubConnState{ConnectivityState: connectivity.TransientFailure})
+
+	// Subconn 0 shoud be returned, because now subconn 1 (temporary fallback) is also not ready.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	sc = pr.SubConn
+
+	if sc != scs[0] || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", sc, err, scs[0])
+	}
+
+	// Simulate subconn 2 recovered.
+	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// As originally mapped subconn 2 is recovered, it shoud be returned.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+	sc = pr.SubConn
+
+	if sc != scs[2] || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", sc, err, scs[2])
+	}
+}
+
 func BenchmarkPick(b *testing.B) {
 	for _, poolSize := range []int{4, 8, 16, 32, 64} {
 		mockCtrl := gomock.NewController(b)

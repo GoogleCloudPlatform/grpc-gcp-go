@@ -53,6 +53,7 @@ func (bb *gcpBalancerBuilder) Build(
 	return &gcpBalancer{
 		cc:          cc,
 		affinityMap: make(map[string]balancer.SubConn),
+		fallbackMap: make(map[string]balancer.SubConn),
 		scRefs:      make(map[balancer.SubConn]*subConnRef),
 		scStates:    make(map[balancer.SubConn]connectivity.State),
 		csEvltr:     &connectivityStateEvaluator{},
@@ -153,6 +154,8 @@ func (ref *subConnRef) streamsDecr() {
 type gcpBalancer struct {
 	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
 
+	poolCfg *poolConfig
+
 	addrs   []resolver.Address
 	cc      balancer.ClientConn
 	csEvltr *connectivityStateEvaluator
@@ -160,15 +163,21 @@ type gcpBalancer struct {
 
 	mu          sync.Mutex
 	affinityMap map[string]balancer.SubConn
+	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
 	picker balancer.Picker
 }
 
-func (gb *gcpBalancer) enforceMinSize(minSize int) {
+func (gb *gcpBalancer) initializePoolCfg(poolCfg *poolConfig) {
 	gb.mu.Lock()
 	defer gb.mu.Unlock()
+	gb.poolCfg = poolCfg
+	gb.enforceMinSize(int(poolCfg.minConn))
+}
+
+func (gb *gcpBalancer) enforceMinSize(minSize int) {
 	for len(gb.scRefs) < minSize {
 		gb.addSubConn()
 	}
@@ -251,7 +260,18 @@ func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
 	if sc, ok := gb.affinityMap[boundKey]; ok {
 		if gb.scStates[sc] != connectivity.Ready {
 			// It's possible that the bound subconn is not in the readySubConns list,
-			// If it's not ready yet, we throw ErrNoSubConnAvailable
+			// If it's not ready, we throw ErrNoSubConnAvailable or
+			// fallback to a previously mapped ready subconn or the least busy.
+			if gb.poolCfg.fallbackToReady {
+				if sc, ok := gb.fallbackMap[boundKey]; ok {
+					return gb.scRefs[sc], true
+				}
+				// Try to create fallback mapping.
+				if scRef, err := gb.picker.(*gcpPicker).getLeastBusySubConnRef(); err == nil {
+					gb.fallbackMap[boundKey] = scRef.subConn
+					return scRef, true
+				}
+			}
 			return nil, true
 		}
 		return gb.scRefs[sc], true
@@ -277,9 +297,7 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 	boundSC, ok := gb.affinityMap[boundKey]
 	if ok {
 		gb.scRefs[boundSC].affinityDecr()
-		if gb.scRefs[boundSC].getAffinityCnt() <= 0 {
-			delete(gb.affinityMap, boundKey)
-		}
+		delete(gb.affinityMap, boundKey)
 	}
 }
 
@@ -304,10 +322,11 @@ func (gb *gcpBalancer) regeneratePicker() {
 }
 
 func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubConnState) {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
 	s := scs.ConnectivityState
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 
-	gb.mu.Lock()
 	oldS, ok := gb.scStates[sc]
 	if !ok {
 		grpclog.Infof(
@@ -315,7 +334,6 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 			sc,
 			s,
 		)
-		gb.mu.Unlock()
 		return
 	}
 	gb.scStates[sc] = s
@@ -326,7 +344,22 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 		delete(gb.scRefs, sc)
 		delete(gb.scStates, sc)
 	}
-	gb.mu.Unlock()
+	if oldS == connectivity.Ready && s != oldS {
+		// Subconn is broken. Remove fallback mapping to this subconn.
+		for k, v := range gb.fallbackMap {
+			if v == sc {
+				delete(gb.fallbackMap, k)
+			}
+		}
+	}
+	if oldS != connectivity.Ready && s == connectivity.Ready {
+		// Remove fallback mapping for the keys of recovered subconn.
+		for k := range gb.fallbackMap {
+			if gb.affinityMap[k] == sc {
+				delete(gb.fallbackMap, k)
+			}
+		}
+	}
 
 	oldAggrState := gb.state
 	gb.state = gb.csEvltr.recordTransition(oldS, s)

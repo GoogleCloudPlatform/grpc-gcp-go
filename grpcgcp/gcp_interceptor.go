@@ -49,6 +49,8 @@ type poolConfig struct {
 	maxConn   uint32
 	minConn   uint32
 	maxStream uint32
+
+	fallbackToReady bool
 }
 
 type gcpContext struct {
