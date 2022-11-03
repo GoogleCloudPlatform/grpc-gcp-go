@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
@@ -39,7 +38,6 @@ func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 
 type gcpPicker struct {
 	gcpBalancer *gcpBalancer
-	mu          sync.Mutex
 	scRefs      []*subConnRef
 	poolCfg     *poolConfig
 }
