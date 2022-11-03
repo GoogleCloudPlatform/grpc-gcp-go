@@ -77,14 +77,13 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		}
 	}
 
-	scRef, err := p.getSubConnRef(boundKey)
+	scRef, err := p.getAndIncrementSubConnRef(boundKey)
 	if err != nil {
 		return balancer.PickResult{}, err
 	}
 	if scRef == nil {
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
-	scRef.streamsIncr()
 
 	// define callback for post process once call is done
 	callback := func(info balancer.DoneInfo) {
@@ -106,6 +105,19 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		scRef.streamsDecr()
 	}
 	return balancer.PickResult{SubConn: scRef.subConn, Done: callback}, nil
+}
+
+func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string) (*subConnRef, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scRef, err := p.getSubConnRef(boundKey)
+	if err != nil {
+		return nil, err
+	}
+	if scRef != nil {
+		scRef.streamsIncr()
+	}
+	return scRef, nil
 }
 
 // getSubConnRef returns the subConnRef object that contains the subconn
