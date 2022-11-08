@@ -45,7 +45,7 @@ type gcpPicker struct {
 func (p *gcpPicker) initializePoolCfg(poolCfg *poolConfig) {
 	if p.poolCfg == nil && poolCfg != nil {
 		p.poolCfg = poolCfg
-		p.gcpBalancer.enforceMinSize(int(poolCfg.minConn))
+		p.gcpBalancer.initializePoolCfg(poolCfg)
 	}
 }
 
@@ -117,6 +117,10 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 		}
 	}
 
+	return p.getLeastBusySubConnRef()
+}
+
+func (p *gcpPicker) getLeastBusySubConnRef() (*subConnRef, error) {
 	minScRef := p.scRefs[0]
 	minStreamsCnt := minScRef.getStreamsCnt()
 	for _, scRef := range p.scRefs {
