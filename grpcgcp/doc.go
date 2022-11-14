@@ -26,14 +26,13 @@ Usage:
 
 1. First, initialize the api configuration. There are two ways:
 
-	1a. Create a json file defining the configuration and use `ParseAPIConfig()`
-		to convert the json file to ApiConfig object.
+	1a. Create a json file defining the configuration and read it.
 
 		// Create some_api_config.json
 		{
 			"channelPool": {
-				"maxSize": 10,
-				"maxConcurrentStreamsLowWatermark": 1
+				"maxSize": 4,
+				"maxConcurrentStreamsLowWatermark": 50
 			},
 			"method": [
 				{
@@ -60,58 +59,71 @@ Usage:
 			]
 		}
 
-		// Then convert json file to apiConfig object:
+		jsonFile, err := ioutil.ReadFile("some_api_config.json")
+		if err != nil {
+			t.Fatalf("Failed to read config file: %v", err)
+		}
+		jsonCfg := string(jsonFile)
 
-		apiConfig, err := grpcgcp.ParseAPIConfig("some_api_config.json")
-
-	1b. Create apiConfig directly.
+	1b. Create apiConfig directly and convert it to json.
 
 		// import (
 		// 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 		// )
 
 		apiConfig := &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxSize:                          10,
-			MaxConcurrentStreamsLowWatermark: 1,
-		},
-		Method: []*configpb.MethodConfig{
-			&configpb.MethodConfig{
-				Name: []string{"/some.api.v1/Method1"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BIND,
-					AffinityKey: "key1",
+			ChannelPool: &configpb.ChannelPoolConfig{
+				MaxSize:                          10,
+				MaxConcurrentStreamsLowWatermark: 1,
+			},
+			Method: []*configpb.MethodConfig{
+				&configpb.MethodConfig{
+					Name: []string{"/some.api.v1/Method1"},
+					Affinity: &configpb.AffinityConfig{
+						Command:     configpb.AffinityConfig_BIND,
+						AffinityKey: "key1",
+					},
+				},
+				&configpb.MethodConfig{
+					Name: []string{"/some.api.v1/Method2"},
+					Affinity: &configpb.AffinityConfig{
+						Command:     configpb.AffinityConfig_BOUND,
+						AffinityKey: "key2",
+					},
+				},
+				&configpb.MethodConfig{
+					Name: []string{"/some.api.v1/Method3"},
+					Affinity: &configpb.AffinityConfig{
+						Command:     configpb.AffinityConfig_UNBIND,
+						AffinityKey: "key3",
+					},
 				},
 			},
-			&configpb.MethodConfig{
-				Name: []string{"/some.api.v1/Method2"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BOUND,
-					AffinityKey: "key2",
-				},
-			},
-			&configpb.MethodConfig{
-				Name: []string{"/some.api.v1/Method3"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_UNBIND,
-					AffinityKey: "key3",
-				},
-			},
-		},
+		}
 
-2. Initialize GCPInterceptor.
+		c, err := protojson.Marshal(apiConfig)
+		if err != nil {
+			t.Fatalf("cannot json encode config: %v", err)
+		}
+		jsonCfg := string(c)
 
-	gcpInt := grpcgcp.NewGCPInterceptor(apiConfig)
-
-3. Make ClientConn with specific DialOptions to enable grpc_gcp load balancer.
+2. Make ClientConn with specific DialOptions to enable grpc_gcp load balancer
+with provided configuration. And specify gRPC-GCP interceptors.
 
 	conn, err := grpc.Dial(
 		target,
 		// Register and specify the grpc-gcp load balancer.
-		grpc.WithBalancerName("grpc_gcp"),
-		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
-		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
+		grpc.WithDisableServiceConfig(),
+		grpc.WithDefaultServiceConfig(
+			fmt.Sprintf(
+				`{"loadBalancingConfig": [{"%s":%s}]}`,
+				grpcgcp.Name,
+				jsonCfg,
+			),
+		),
+		// Set grpcgcp interceptors.
+		grpc.WithUnaryInterceptor(grpcgcp.GCPUnaryClientInterceptor),
+		grpc.WithStreamInterceptor(grpcgcp.GCPStreamClientInterceptor),
 	)
-
 */
 package grpcgcp // import "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
