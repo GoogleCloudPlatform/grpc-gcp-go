@@ -19,130 +19,229 @@
 package grpcgcp
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing"
 
-	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
-	"google.golang.org/grpc/balancer"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
+	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc"
 )
 
-func TestInitApiConfig(t *testing.T) {
-	expectedSize := uint32(10)
-	expectedStreams := uint32(10)
-	apiConfig := &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxSize:                          expectedSize,
-			MaxConcurrentStreamsLowWatermark: expectedStreams,
-		},
+func TestGCPUnaryClientInterceptor(t *testing.T) {
+	ctx := context.TODO()
+	wantMethod := "someMethod"
+	wantReq := "requestMessage"
+	wantRepl := "replyMessage"
+	wantGcpCtx := &gcpContext{
+		reqMsg:   wantReq,
+		replyMsg: wantRepl,
 	}
-	gcpInt := NewGCPInterceptor(apiConfig)
-	if gcpInt.poolCfg.maxConn != expectedSize {
-		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, expectedSize)
+	wantCC := &grpc.ClientConn{}
+	wantOpts := []grpc.CallOption{grpc.CallContentSubtype("someSubtype"), grpc.MaxCallRecvMsgSize(42)}
+
+	invCalled := false
+	var gotCtx context.Context
+	gotMethod := ""
+	var gotReq, gotRepl interface{}
+	var gotCC *grpc.ClientConn
+	gotOpts := []grpc.CallOption{}
+	inv := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		invCalled = true
+		gotCtx = ctx
+		gotMethod = method
+		gotReq = req
+		gotRepl = reply
+		gotCC = cc
+		gotOpts = opts
+		return nil
 	}
-	if gcpInt.poolCfg.maxStream != expectedStreams {
-		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, expectedStreams)
+
+	if err := GCPUnaryClientInterceptor(ctx, wantMethod, wantReq, wantRepl, wantCC, inv, wantOpts...); err != nil {
+		t.Fatalf("GCPUnaryClientInterceptor(...) returned error: %v, want: nil", err)
 	}
-	if len(gcpInt.methodToAffinity) != 0 {
-		t.Errorf("methodToAffinity has incorrect size: %v, want: %v", len(gcpInt.methodToAffinity), 0)
+	if !invCalled {
+		t.Fatalf("provided grpc.UnaryInvoker function was not called")
+	}
+	gotGcpCtx, hasGcpCtx := gotCtx.Value(gcpKey).(*gcpContext)
+	if !hasGcpCtx {
+		t.Errorf("provided grpc.UnaryInvoker function was called with context without gcpContext")
+	} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected gcpContext (-want, +got):\n%s", diff)
+	}
+	if gotMethod != wantMethod {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected method: %s, want: %s", gotMethod, wantMethod)
+	}
+	if gotReq != wantReq {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected request: %s, want: %s", gotReq, wantReq)
+	}
+	if gotRepl != wantRepl {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected response: %s, want: %s", gotRepl, wantRepl)
+	}
+	if gotCC != wantCC {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected ClientConn: %v, want: %v", gotCC, wantCC)
+	}
+	if diff := cmp.Diff(wantOpts, gotOpts); diff != "" {
+		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected options (-want, +got):\n%s", diff)
 	}
 }
 
-func TestDefaultApiConfig(t *testing.T) {
-	defaultSize := uint32(0)
-	defaultStreams := uint32(100)
-	apiConfig := &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{},
-	}
-	gcpInt := NewGCPInterceptor(apiConfig)
-	if gcpInt.poolCfg.maxConn != defaultSize {
-		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, defaultSize)
-	}
-	if gcpInt.poolCfg.maxStream != defaultStreams {
-		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, defaultStreams)
-	}
+type strictMatcher struct {
+	gomock.Matcher
 
-	apiConfig = &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxConcurrentStreamsLowWatermark: 0,
-		},
-	}
-	gcpInt = NewGCPInterceptor(apiConfig)
-	if gcpInt.poolCfg.maxConn != defaultSize {
-		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, defaultSize)
-	}
-	if gcpInt.poolCfg.maxStream != defaultStreams {
-		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, defaultStreams)
-	}
-
-	apiConfig = &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxConcurrentStreamsLowWatermark: 200,
-		},
-	}
-	gcpInt = NewGCPInterceptor(apiConfig)
-	if gcpInt.poolCfg.maxConn != defaultSize {
-		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, defaultSize)
-	}
-	if gcpInt.poolCfg.maxStream != defaultStreams {
-		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, defaultStreams)
-	}
+	matchWith interface{}
 }
 
-func TestParseJsonApiConfig(t *testing.T) {
-	expectedSize := uint32(10)
-	expectedStreams := uint32(10)
-	apiConfig, err := ParseAPIConfig("test_config.json")
+func (sm *strictMatcher) Matches(x interface{}) bool {
+	return sm.matchWith == x
+}
+
+func (sm *strictMatcher) String() string {
+	return fmt.Sprintf("at address %p: %v", &sm.matchWith, sm.matchWith)
+}
+
+type fakeResp struct{}
+
+func TestGCPStreamClientInterceptor(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	ctx := context.TODO()
+	wantMethod := "someMethod"
+	wantReq := "someRequest"
+	wantRes := &fakeResp{}
+	wantGcpCtx := &gcpContext{
+		reqMsg: wantReq,
+	}
+	wantSD := &grpc.StreamDesc{}
+	wantCC := &grpc.ClientConn{}
+	wantOpts := []grpc.CallOption{grpc.CallContentSubtype("someSubtype"), grpc.MaxCallRecvMsgSize(42)}
+
+	streamerCalled := false
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		streamerCalled = true
+		gotGcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
+		if !hasGcpCtx {
+			t.Errorf("grpc.Streamer called with context without gcpContext")
+		} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+			t.Errorf("grpc.Streamer called with unexpected gcpContext (-want, +got):\n%s", diff)
+		}
+		if desc != wantSD {
+			t.Errorf("grpc.Streamer called with unexpected StreamDesc: %v, want: %v", desc, wantSD)
+		}
+		if cc != wantCC {
+			t.Errorf("grpc.Streamer called with unexpected ClientConn: %v, want: %v", cc, wantCC)
+		}
+		if method != wantMethod {
+			t.Errorf("grpc.Streamer called with unexpected method: %v, want: %v", method, wantMethod)
+		}
+		if diff := cmp.Diff(wantOpts, opts); diff != "" {
+			t.Errorf("grpc.Streamer called with unexpected options (-want, +got):\n%s", diff)
+		}
+		mockCS := mocks.NewMockClientStream(mockCtrl)
+		mockCS.EXPECT().SendMsg(gomock.Eq(wantReq)).Times(1)
+		mockCS.EXPECT().RecvMsg(&strictMatcher{matchWith: wantRes}).Times(1)
+		return mockCS, nil
+	}
+	cs, err := GCPStreamClientInterceptor(
+		ctx,
+		wantSD,
+		wantCC,
+		wantMethod,
+		streamer,
+		wantOpts...,
+	)
 	if err != nil {
-		t.Fatalf("Failed to parse api config file: %v", err)
+		t.Fatalf("GCPStreamClientInterceptor(...) returned error: %v, want: nil", err)
 	}
+	if streamerCalled {
+		t.Fatalf("GCPStreamClientInterceptor(...) unexpectedly called grpc.Streamer on init")
+	}
+	if err := cs.SendMsg(wantReq); err != nil {
+		t.Fatalf("SendMsg(wantReq) returned error: %v, want: nil", err)
+	}
+	if !streamerCalled {
+		t.Fatalf("SendMsg(wantReq) must have been called grpc.Streamer")
+	}
+	if err := cs.RecvMsg(wantRes); err != nil {
+		t.Fatalf("RecvMsg() returned error: %v, want: nil", err)
+	}
+}
 
-	// Register test builder wrapper
-	balancer.Register(&testBuilderWrapper{
-		name:        Name,
-		realBuilder: &gcpBalancerBuilder{name: Name},
-	})
+func TestGCPStreamClientInterceptorCallingReadBeforeSend(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
 
-	gcpInt := NewGCPInterceptor(apiConfig)
+	ctx := context.TODO()
+	wantMethod := "someMethod"
+	wantReq := "someRequest"
+	wantRes := &fakeResp{}
+	wantGcpCtx := &gcpContext{
+		reqMsg: wantReq,
+	}
+	wantSD := &grpc.StreamDesc{}
+	wantCC := &grpc.ClientConn{}
+	wantOpts := []grpc.CallOption{grpc.CallContentSubtype("someSubtype"), grpc.MaxCallRecvMsgSize(42)}
 
-	if gcpInt.poolCfg.maxConn != expectedSize {
-		t.Errorf("poolCfg has incorrect maxConn: %v, want: %v", gcpInt.poolCfg.maxConn, expectedSize)
+	streamerCalled := false
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		streamerCalled = true
+		gotGcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
+		if !hasGcpCtx {
+			t.Errorf("grpc.Streamer called with context without gcpContext")
+		} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+			t.Errorf("grpc.Streamer called with unexpected gcpContext (-want, +got):\n%s", diff)
+		}
+		if desc != wantSD {
+			t.Errorf("grpc.Streamer called with unexpected StreamDesc: %v, want: %v", desc, wantSD)
+		}
+		if cc != wantCC {
+			t.Errorf("grpc.Streamer called with unexpected ClientConn: %v, want: %v", cc, wantCC)
+		}
+		if method != wantMethod {
+			t.Errorf("grpc.Streamer called with unexpected method: %v, want: %v", method, wantMethod)
+		}
+		if diff := cmp.Diff(wantOpts, opts); diff != "" {
+			t.Errorf("grpc.Streamer called with unexpected options (-want, +got):\n%s", diff)
+		}
+		mockCS := mocks.NewMockClientStream(mockCtrl)
+		mockCS.EXPECT().SendMsg(gomock.Eq(wantReq)).Times(1)
+		mockCS.EXPECT().RecvMsg(&strictMatcher{matchWith: wantRes}).Times(1)
+		return mockCS, nil
 	}
-	if gcpInt.poolCfg.maxStream != expectedStreams {
-		t.Errorf("poolCfg has incorrect maxStream: %v, want: %v", gcpInt.poolCfg.maxStream, expectedStreams)
+	cs, err := GCPStreamClientInterceptor(
+		ctx,
+		wantSD,
+		wantCC,
+		wantMethod,
+		streamer,
+		wantOpts...,
+	)
+	if err != nil {
+		t.Fatalf("GCPStreamClientInterceptor(...) returned error: %v, want: nil", err)
 	}
-
-	if gcpInt.methodToAffinity == nil {
-		t.Fatalf("gcpInt.methodToAffinity should not be nil")
+	if streamerCalled {
+		t.Fatalf("GCPStreamClientInterceptor(...) unexpectedly called grpc.Streamer on init")
 	}
-
-	expectedMethods := 3
-	if len(gcpInt.methodToAffinity) != expectedMethods {
-		t.Errorf("methodToAffinity has incorrect size: %v, want: %v", len(gcpInt.methodToAffinity), expectedMethods)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	received := &sync.WaitGroup{}
+	received.Add(1)
+	go func() {
+		wg.Done()
+		if err := cs.RecvMsg(wantRes); err != nil {
+			t.Errorf("RecvMsg() returned error: %v, want: nil", err)
+		}
+		received.Done()
+	}()
+	wg.Wait()
+	if err := cs.SendMsg(wantReq); err != nil {
+		t.Fatalf("SendMsg(wantReq) returned error: %v, want: nil", err)
 	}
-
-	methodName := "method1"
-	affCfg, ok := gcpInt.methodToAffinity[methodName]
-	if !ok {
-		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
+	if !streamerCalled {
+		t.Fatalf("SendMsg(wantReq) must    have been called grpc.Streamer")
 	}
-	if affCfg.GetCommand() != configpb.AffinityConfig_BIND {
-		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_BIND)
-	}
-
-	methodName = "method2"
-	affCfg, ok = gcpInt.methodToAffinity[methodName]
-	if !ok {
-		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
-	}
-	if affCfg.GetCommand() != configpb.AffinityConfig_BOUND {
-		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_BOUND)
-	}
-
-	methodName = "method3"
-	affCfg, ok = gcpInt.methodToAffinity[methodName]
-	if !ok {
-		t.Fatalf("gcpInt.methodToAffinity should contain key: %v", methodName)
-	}
-	if affCfg.GetCommand() != configpb.AffinityConfig_UNBIND {
-		t.Errorf("affinity config has incorrect command: %v, want: %v", affCfg.GetCommand(), configpb.AffinityConfig_UNBIND)
-	}
+	received.Wait()
 }

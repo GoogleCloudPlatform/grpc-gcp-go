@@ -19,14 +19,20 @@
 package grpcgcp
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"google.golang.org/grpc/balancer"
-
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/serviceconfig"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
 
 var _ balancer.Balancer = &gcpBalancer{} // Ensure gcpBalancer implements Balancer
@@ -36,6 +42,9 @@ const (
 	Name = "grpc_gcp"
 
 	healthCheckEnabled = true
+	defaultMinSize     = 1
+	defaultMaxSize     = 4
+	defaultMaxStreams  = 100
 )
 
 func init() {
@@ -43,7 +52,12 @@ func init() {
 }
 
 type gcpBalancerBuilder struct {
-	name string
+	balancer.ConfigParser
+}
+
+type GcpBalancerConfig struct {
+	serviceconfig.LoadBalancingConfig
+	*pb.ApiConfig
 }
 
 func (bb *gcpBalancerBuilder) Build(
@@ -52,6 +66,7 @@ func (bb *gcpBalancerBuilder) Build(
 ) balancer.Balancer {
 	return &gcpBalancer{
 		cc:          cc,
+		methodCfg:   make(map[string]*pb.AffinityConfig),
 		affinityMap: make(map[string]balancer.SubConn),
 		fallbackMap: make(map[string]balancer.SubConn),
 		scRefs:      make(map[balancer.SubConn]*subConnRef),
@@ -68,11 +83,20 @@ func (*gcpBalancerBuilder) Name() string {
 	return Name
 }
 
+// ParseConfig converts raw json config into GcpBalancerConfig.
+// This is called by ClientConn on any load balancer config update.
+// After parsing the config, ClientConn calls UpdateClientConnState passing the config.
+func (*gcpBalancerBuilder) ParseConfig(j json.RawMessage) (serviceconfig.LoadBalancingConfig, error) {
+	c := &GcpBalancerConfig{
+		ApiConfig: &pb.ApiConfig{},
+	}
+	err := protojson.Unmarshal(j, c)
+	return c, err
+}
+
 // newBuilder creates a new grpcgcp balancer builder.
 func newBuilder() balancer.Builder {
-	return &gcpBalancerBuilder{
-		name: Name,
-	}
+	return &gcpBalancerBuilder{}
 }
 
 // connectivityStateEvaluator gets updated by addrConns when their
@@ -154,7 +178,8 @@ func (ref *subConnRef) streamsDecr() {
 type gcpBalancer struct {
 	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
 
-	poolCfg *poolConfig
+	cfg       *GcpBalancerConfig
+	methodCfg map[string]*pb.AffinityConfig
 
 	addrs   []resolver.Address
 	cc      balancer.ClientConn
@@ -170,23 +195,66 @@ type gcpBalancer struct {
 	picker balancer.Picker
 }
 
-func (gb *gcpBalancer) initializePoolCfg(poolCfg *poolConfig) {
-	gb.mu.Lock()
-	defer gb.mu.Unlock()
-	gb.poolCfg = poolCfg
-	gb.enforceMinSize(int(poolCfg.minConn))
+func (gb *gcpBalancer) initializeConfig(cfg *GcpBalancerConfig) {
+	gb.cfg = &GcpBalancerConfig{
+		ApiConfig: &pb.ApiConfig{
+			ChannelPool: &pb.ChannelPoolConfig{},
+		},
+	}
+	if cfg != nil && cfg.ApiConfig != nil {
+		gb.cfg = &GcpBalancerConfig{
+			ApiConfig: proto.Clone(cfg.ApiConfig).(*pb.ApiConfig),
+		}
+	}
+
+	if gb.cfg.GetChannelPool() == nil {
+		gb.cfg.ChannelPool = &pb.ChannelPoolConfig{}
+	}
+	cp := gb.cfg.GetChannelPool()
+	if cp.GetMinSize() == 0 {
+		cp.MinSize = defaultMinSize
+	}
+	if cp.GetMaxSize() == 0 {
+		cp.MaxSize = defaultMaxSize
+	}
+	if cp.GetMaxConcurrentStreamsLowWatermark() == 0 {
+		cp.MaxConcurrentStreamsLowWatermark = defaultMaxStreams
+	}
+	mp := make(map[string]*pb.AffinityConfig)
+	methodCfgs := gb.cfg.GetMethod()
+	for _, methodCfg := range methodCfgs {
+		methodNames := methodCfg.GetName()
+		affinityCfg := methodCfg.GetAffinity()
+		if methodNames != nil && affinityCfg != nil {
+			for _, method := range methodNames {
+				mp[method] = affinityCfg
+			}
+		}
+	}
+	gb.methodCfg = mp
+	gb.enforceMinSize()
 }
 
-func (gb *gcpBalancer) enforceMinSize(minSize int) {
-	for len(gb.scRefs) < minSize {
+func (gb *gcpBalancer) enforceMinSize() {
+	for len(gb.scRefs) < int(gb.cfg.GetChannelPool().GetMinSize()) {
 		gb.addSubConn()
 	}
 }
 
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
 	addrs := ccs.ResolverState.Addresses
-	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
+	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs, " and balancer config: ", ccs.BalancerConfig)
 	gb.addrs = addrs
+	// TODO(golobokov): handle config changes.
+	if gb.cfg == nil {
+		cfg, ok := ccs.BalancerConfig.(*GcpBalancerConfig)
+		if !ok && ccs.BalancerConfig != nil {
+			return fmt.Errorf("provided config is not GcpBalancerConfig: %v", ccs.BalancerConfig)
+		}
+		gb.initializeConfig(cfg)
+	}
 
 	if len(gb.scRefs) == 0 {
 		gb.newSubConn()
@@ -211,6 +279,7 @@ func (gb *gcpBalancer) ResolverError(err error) {
 
 // check current connection pool size
 func (gb *gcpBalancer) getConnectionPoolSize() int {
+	// TODO(golobokov): replace this with locked increase of subconns.
 	gb.mu.Lock()
 	defer gb.mu.Unlock()
 	return len(gb.scRefs)
@@ -262,7 +331,7 @@ func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
 			// It's possible that the bound subconn is not in the readySubConns list,
 			// If it's not ready, we throw ErrNoSubConnAvailable or
 			// fallback to a previously mapped ready subconn or the least busy.
-			if gb.poolCfg.fallbackToReady {
+			if gb.cfg.GetChannelPool().GetFallbackToReady() {
 				if sc, ok := gb.fallbackMap[boundKey]; ok {
 					return gb.scRefs[sc], true
 				}

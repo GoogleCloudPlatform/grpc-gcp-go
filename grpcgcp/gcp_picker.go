@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
@@ -29,24 +30,15 @@ import (
 
 func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
-		gcpBalancer: gb,
-		scRefs:      readySCRefs,
-		// The pool config is unavailable until Pick is called with a config in the context.
-		poolCfg: nil,
+		gb:     gb,
+		scRefs: readySCRefs,
 	}
 }
 
 type gcpPicker struct {
-	gcpBalancer *gcpBalancer
-	scRefs      []*subConnRef
-	poolCfg     *poolConfig
-}
-
-func (p *gcpPicker) initializePoolCfg(poolCfg *poolConfig) {
-	if p.poolCfg == nil && poolCfg != nil {
-		p.poolCfg = poolCfg
-		p.gcpBalancer.initializePoolCfg(poolCfg)
-	}
+	gb     *gcpBalancer
+	mu     sync.Mutex
+	scRefs []*subConnRef
 }
 
 func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
@@ -54,26 +46,21 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
-	ctx := info.Ctx
-	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
+	gcpCtx, hasGcpCtx := info.Ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
+	locator := ""
+	var cmd grpc_gcp.AffinityConfig_Command
 
-	if hasGcpCtx {
-		if p.poolCfg == nil && gcpCtx.poolCfg != nil {
-			p.initializePoolCfg(gcpCtx.poolCfg)
-		}
-		affinity := gcpCtx.affinityCfg
-		if affinity != nil {
-			locator := affinity.GetAffinityKey()
-			cmd := affinity.GetCommand()
-			if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
-				a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
-				if err != nil {
-					return balancer.PickResult{}, fmt.Errorf(
-						"failed to retrieve affinity key from request message: %v", err)
-				}
-				boundKey = a
+	if mcfg, ok := p.gb.methodCfg[info.FullMethodName]; ok && hasGcpCtx {
+		locator = mcfg.GetAffinityKey()
+		cmd = mcfg.GetCommand()
+		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
+			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
+			if err != nil {
+				return balancer.PickResult{}, fmt.Errorf(
+					"failed to retrieve affinity key from request message: %v", err)
 			}
+			boundKey = a
 		}
 	}
 
@@ -87,22 +74,19 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 
 	// define callback for post process once call is done
 	callback := func(info balancer.DoneInfo) {
-		if info.Err == nil {
-			if hasGcpCtx {
-				affinity := gcpCtx.affinityCfg
-				locator := affinity.GetAffinityKey()
-				cmd := affinity.GetCommand()
-				if cmd == grpc_gcp.AffinityConfig_BIND {
-					bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
-					if err == nil {
-						p.gcpBalancer.bindSubConn(bindKey, scRef.subConn)
-					}
-				} else if cmd == grpc_gcp.AffinityConfig_UNBIND {
-					p.gcpBalancer.unbindSubConn(boundKey)
-				}
-			}
-		}
 		scRef.streamsDecr()
+		if info.Err != nil {
+			return
+		}
+		switch cmd {
+		case grpc_gcp.AffinityConfig_BIND:
+			bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
+			if err == nil {
+				p.gb.bindSubConn(bindKey, scRef.subConn)
+			}
+		case grpc_gcp.AffinityConfig_UNBIND:
+			p.gb.unbindSubConn(boundKey)
+		}
 	}
 	return balancer.PickResult{SubConn: scRef.subConn, Done: callback}, nil
 }
@@ -124,7 +108,7 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string) (*subConnRef, err
 // ready to be used by picker.
 func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	if boundKey != "" {
-		if ref, ok := p.gcpBalancer.getReadySubConnRef(boundKey); ok {
+		if ref, ok := p.gb.getReadySubConnRef(boundKey); ok {
 			return ref, nil
 		}
 	}
@@ -143,14 +127,14 @@ func (p *gcpPicker) getLeastBusySubConnRef() (*subConnRef, error) {
 	}
 
 	// If the least busy connection still has capacity, use it
-	if minStreamsCnt < int32(p.poolCfg.maxStream) {
+	if minStreamsCnt < int32(p.gb.cfg.GetChannelPool().GetMaxConcurrentStreamsLowWatermark()) {
 		return minScRef, nil
 	}
 
-	if p.poolCfg.maxConn == 0 || p.gcpBalancer.getConnectionPoolSize() < int(p.poolCfg.maxConn) {
+	if p.gb.cfg.GetChannelPool().GetMaxSize() == 0 || p.gb.getConnectionPoolSize() < int(p.gb.cfg.GetChannelPool().GetMaxSize()) {
 		// Ask balancer to create new subconn when all current subconns are busy and
 		// the connection pool still has capacity (either unlimited or maxSize is not reached).
-		p.gcpBalancer.newSubConn()
+		p.gb.newSubConn()
 
 		// Let this picker return ErrNoSubConnAvailable because it needs some time
 		// for the subconn to be READY.

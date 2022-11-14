@@ -48,6 +48,13 @@ message ChannelPoolConfig {
 
   // The minimum number of channels in the pool.
   uint32 min_size = 4;
+
+  // If a channel mapped to an affinity key is not ready, temporarily fallback
+  // to another ready channel.
+  // Enabling this fallback is beneficial in scenarios with short RPC timeouts
+  // and rather slow connection establishing or during incidents when new
+  // connections fail but existing connections still operate.
+  bool fallback_to_ready = 5;
 }
 
 message MethodConfig {
