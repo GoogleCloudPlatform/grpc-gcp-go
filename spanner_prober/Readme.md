@@ -28,6 +28,10 @@ Run prober:
 - probe_deadline - Deadline for probe request. (Default: 10s)
 - endpoint - Cloud Spanner Endpoint to send request to.
 
+## Disabling automatic resource detection
+
+If running on GCE/GKE the metrics will be shipped to corresponding "VM Instance"/"Kubernetes Container" resource in Cloud Monitoring. To disable this and use global resource set environment variable `OC_RESOURCE_TYPE=global`.
+
 ## Probe types
 
 | probe_type   | Description                                                    |
