@@ -55,6 +55,14 @@ func main() {
 		log.Exit("Flag validation failed... exiting.")
 	}
 
+	fmt.Printf("Prober started with options:\nenable_cloud_ops: %v\nproject: %q\n"+
+		"ops_project: %q\ninstance: %q\ndatabase: %q\ninstance_config: %q\n"+
+		"node_count: %d\nprocessing_units: %d\nqps: %0.3f\nnum_rows: %d\n"+
+		"probe_type: %q\nmax_staleness: %v\npayload_size: %d\nprobe_deadline: %v\n"+
+		"endpoint: %q\n", *enableCloudOps, *project, *opsProject, *instance_name,
+		*database_name, *instanceConfig, *nodeCount, *processingUnits, *qps, *numRows,
+		*probeType, *maxStaleness, *payloadSize, *probeDeadline, *endpoint)
+
 	grpclog.SetLoggerV2(grpclog.NewLoggerV2(ioutil.Discard, /* Discard logs at INFO level */
 		os.Stderr, os.Stderr))
 
