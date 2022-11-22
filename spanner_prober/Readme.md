@@ -1,5 +1,15 @@
 # gRPC-GCP Go Spanner prober
 
+The prober performs an operation (set by `probe_type`) at a stable rate (`qps`).
+
+All operations access the "ProbeTarget" table in the `database` in the `instance`.
+
+The prober will try to create the instance, database, and the table if any of them doesn't exist.
+
+For each operation, the prober picks a random number from 0 to `num_rows` and performs read and/or write operations with the selected number as the primary key.
+
+Each write call updates/inserts three columns: a primary key, a `payload_size`-bytes randomly generated payload, and a SHA256 checksum of the payload.
+
 ## Usage
 
 Build image:
@@ -42,3 +52,28 @@ If running on GCE/GKE the metrics will be shipped to corresponding "VM Instance"
 | stale_query  | read-only txn `Query` with timestamp bound.                    |
 | dml          | read-write txn with `Query` followed by `Update`.              |
 | read_write   | read-write txn with `Read` followed by `BufferWrite` mutation. |
+
+## Reported metrics
+
+All metrics are prefixed with `custom.googleapis.com/opencensus/grpc_gcp_spanner_prober/`
+
+`op_name` label 
+
+| Metric       | Unit | Kind       | Value        | Decription
+| ------------ | ---- | ---------- | ------------ | ----------
+| **Prober specific**
+| op_count     | 1    | Cumulative | Int64        | Operation count. Labeled by: op_name, result.
+| op_latency   | ms   | Cumulative | Distribution | Operation latency. Labeled by: op_name, result.
+| t4t7_latency | ms   | Cumulative | Distribution | GFE latency. Labeled by: rpc_type (unary/streaming), grpc_client_method
+| **Opencensus default gRPC metrics** | | | | additional prefix `grpc.io/client/`
+| completed_rpcs         | 1    | Cumulative | Int64        | Count of RPCs by method and status.
+| received_bytes_per_rpc | byte | Cumulative | Distribution | Distribution of bytes received per RPC, by method.
+| roundtrip_latency      | ms   | Cumulative | Distribution | Distribution of round-trip latency, by method.
+| sent_bytes_per_rpc     | byte | Cumulative | Distribution | Distribution of bytes sent per RPC, by method.
+| **From Spanner client** | | | | additional prefix `cloud.google.com/go/spanner/` Labels: client_id, instance_id, database, library_version
+| max_allowed_sessions  | 1 | Gauge      | Int64 | The maximum number of sessions allowed. Configurable by the user.
+| max_in_use_sessions   | 1 | Gauge      | Int64 | The maximum number of sessions in use during the last 10 minute interval.
+| num_acquired_sessions | 1 | Cumulative | Int64 | The number of sessions acquired from the session pool.
+| num_released_sessions | 1 | Cumulative | Int64 | The number of sessions released by the user and pool maintainer.
+| num_sessions_in_pool  | 1 | Gauge      | Int64 | The number of sessions currently in use. Labeled by type.
+| open_session_count    | 1 | Gauge      | Int64 | Number of sessions currently opened.
