@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
@@ -237,11 +238,12 @@ func TestGCPStreamClientInterceptorCallingReadBeforeSend(t *testing.T) {
 		received.Done()
 	}()
 	wg.Wait()
+	time.Sleep(time.Millisecond)
 	if err := cs.SendMsg(wantReq); err != nil {
 		t.Fatalf("SendMsg(wantReq) returned error: %v, want: nil", err)
 	}
 	if !streamerCalled {
-		t.Fatalf("SendMsg(wantReq) must    have been called grpc.Streamer")
+		t.Fatalf("SendMsg(wantReq) must have been called grpc.Streamer")
 	}
 	received.Wait()
 }

@@ -269,7 +269,6 @@ func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error
 	addrs := ccs.ResolverState.Addresses
 	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs, " and balancer config: ", ccs.BalancerConfig)
 	gb.addrs = addrs
-	// TODO(golobokov): handle config changes.
 	if gb.cfg == nil {
 		cfg, ok := ccs.BalancerConfig.(*GcpBalancerConfig)
 		if !ok && ccs.BalancerConfig != nil {

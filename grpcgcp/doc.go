@@ -73,8 +73,8 @@ Usage:
 
 		apiConfig := &configpb.ApiConfig{
 			ChannelPool: &configpb.ChannelPoolConfig{
-				MaxSize:                          10,
-				MaxConcurrentStreamsLowWatermark: 1,
+				MaxSize:                          4,
+				MaxConcurrentStreamsLowWatermark: 50,
 			},
 			Method: []*configpb.MethodConfig{
 				&configpb.MethodConfig{
