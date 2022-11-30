@@ -20,102 +20,25 @@ package grpcgcp
 
 import (
 	"context"
-	"io/ioutil"
 	"sync"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/encoding/protojson"
-
-	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
-)
-
-const (
-	// Default max number of connections is 0, meaning "no limit"
-	defaultMaxConn = 0
-
-	// Default minimum number of connections.
-	defaultMinConn = 1
-
-	// Default max stream watermark is 100, which is the current stream limit for GFE.
-	// Any value >100 will be rounded down to 100.
-	defaultMaxStream = 100
 )
 
 type key int
 
 var gcpKey key
 
-type poolConfig struct {
-	maxConn   uint32
-	minConn   uint32
-	maxStream uint32
-
-	fallbackToReady bool
-}
-
 type gcpContext struct {
-	affinityCfg *pb.AffinityConfig
-	poolCfg     *poolConfig
 	// request message used for pre-process of an affinity call
 	reqMsg interface{}
 	// response message used for post-process of an affinity call
 	replyMsg interface{}
 }
 
-// GCPInterceptor provides functions for intercepting client requests
-// in order to support GCP specific features
-type GCPInterceptor struct {
-	poolCfg *poolConfig
-
-	// Maps method path to AffinityConfig
-	methodToAffinity map[string]*pb.AffinityConfig
-}
-
-// NewGCPInterceptor creates a new GCPInterceptor with a given ApiConfig
-func NewGCPInterceptor(config *pb.ApiConfig) *GCPInterceptor {
-	mp := make(map[string]*pb.AffinityConfig)
-	methodCfgs := config.GetMethod()
-	for _, methodCfg := range methodCfgs {
-		methodNames := methodCfg.GetName()
-		affinityCfg := methodCfg.GetAffinity()
-		if methodNames != nil && affinityCfg != nil {
-			for _, method := range methodNames {
-				mp[method] = affinityCfg
-			}
-		}
-	}
-
-	poolCfg := &poolConfig{
-		maxConn:   defaultMaxConn,
-		minConn:   defaultMinConn,
-		maxStream: defaultMaxStream,
-	}
-
-	userPoolCfg := config.GetChannelPool()
-
-	// Set user defined MaxSize.
-	poolCfg.maxConn = userPoolCfg.GetMaxSize()
-
-	// Set user defined MinSize.
-	if userPoolCfg.GetMinSize() > 0 {
-		poolCfg.minConn = userPoolCfg.GetMinSize()
-	}
-
-	// Set user defined MaxConcurrentStreamsLowWatermark if ranged in [1, defaultMaxStream],
-	// otherwise use the defaultMaxStream.
-	watermarkValue := userPoolCfg.GetMaxConcurrentStreamsLowWatermark()
-	if watermarkValue >= 1 && watermarkValue <= defaultMaxStream {
-		poolCfg.maxStream = watermarkValue
-	}
-	return &GCPInterceptor{
-		poolCfg:          poolCfg,
-		methodToAffinity: mp,
-	}
-}
-
 // GCPUnaryClientInterceptor intercepts the execution of a unary RPC
 // and injects necessary information to be used by the picker.
-func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
+func GCPUnaryClientInterceptor(
 	ctx context.Context,
 	method string,
 	req interface{},
@@ -124,12 +47,9 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 	invoker grpc.UnaryInvoker,
 	opts ...grpc.CallOption,
 ) error {
-	affinityCfg, _ := gcpInt.methodToAffinity[method]
 	gcpCtx := &gcpContext{
-		affinityCfg: affinityCfg,
-		reqMsg:      req,
-		replyMsg:    reply,
-		poolCfg:     gcpInt.poolCfg,
+		reqMsg:   req,
+		replyMsg: reply,
 	}
 	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 
@@ -138,7 +58,7 @@ func (gcpInt *GCPInterceptor) GCPUnaryClientInterceptor(
 
 // GCPStreamClientInterceptor intercepts the execution of a client streaming RPC
 // and injects necessary information to be used by the picker.
-func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
+func GCPStreamClientInterceptor(
 	ctx context.Context,
 	desc *grpc.StreamDesc,
 	cc *grpc.ClientConn,
@@ -148,14 +68,7 @@ func (gcpInt *GCPInterceptor) GCPStreamClientInterceptor(
 ) (grpc.ClientStream, error) {
 	// This constructor does not create a real ClientStream,
 	// it only stores all parameters and let SendMsg() to create ClientStream.
-	affinityCfg, _ := gcpInt.methodToAffinity[method]
-	gcpCtx := &gcpContext{
-		affinityCfg: affinityCfg,
-		poolCfg:     gcpInt.poolCfg,
-	}
-	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
 	cs := &gcpClientStream{
-		gcpInt:   gcpInt,
 		ctx:      ctx,
 		desc:     desc,
 		cc:       cc,
@@ -173,25 +86,20 @@ type gcpClientStream struct {
 
 	cond          *sync.Cond
 	initStreamErr error
-	gcpInt        *GCPInterceptor
-	ctx           context.Context
-	desc          *grpc.StreamDesc
-	cc            *grpc.ClientConn
-	method        string
-	streamer      grpc.Streamer
-	opts          []grpc.CallOption
+
+	ctx      context.Context
+	desc     *grpc.StreamDesc
+	cc       *grpc.ClientConn
+	method   string
+	streamer grpc.Streamer
+	opts     []grpc.CallOption
 }
 
 func (cs *gcpClientStream) SendMsg(m interface{}) error {
 	cs.Lock()
 	// Initialize underlying ClientStream when getting the first request.
 	if cs.ClientStream == nil {
-		gcpCtx := &gcpContext{
-			affinityCfg: cs.ctx.Value(gcpKey).(*gcpContext).affinityCfg,
-			reqMsg:      m,
-			poolCfg:     cs.gcpInt.poolCfg,
-		}
-		ctx := context.WithValue(cs.ctx, gcpKey, gcpCtx)
+		ctx := context.WithValue(cs.ctx, gcpKey, &gcpContext{reqMsg: m})
 		realCS, err := cs.streamer(ctx, cs.desc, cs.cc, cs.method, cs.opts...)
 		if err != nil {
 			cs.initStreamErr = err
@@ -219,15 +127,4 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 	}
 	cs.Unlock()
 	return cs.ClientStream.RecvMsg(m)
-}
-
-// ParseAPIConfig parses a json config file into ApiConfig proto message.
-func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
-	jsonFile, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	result := &pb.ApiConfig{}
-	protojson.Unmarshal(jsonFile, result)
-	return result, nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/test_grpc/helloworld/helloworld"
@@ -134,13 +135,18 @@ func (s *server) InterruptedHello(srv pb.Greeter_InterruptedHelloServer) error {
 	}
 }
 
-func getConn(config *configpb.ApiConfig) (*grpc.ClientConn, error) {
-	gcpInt := grpcgcp.NewGCPInterceptor(config)
+func getConn(config *configpb.ApiConfig, t *testing.T) (*grpc.ClientConn, error) {
+	t.Helper()
+	c, err := protojson.Marshal(config)
+	if err != nil {
+		t.Fatalf("cannot parse config: %v", err)
+	}
 	opts := []grpc.DialOption{
 		grpc.WithInsecure(),
-		grpc.WithBalancerName(grpcgcp.Name),
-		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
-		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
+		grpc.WithDisableServiceConfig(),
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, grpcgcp.Name, string(c))),
+		grpc.WithUnaryInterceptor(grpcgcp.GCPUnaryClientInterceptor),
+		grpc.WithStreamInterceptor(grpcgcp.GCPStreamClientInterceptor),
 	}
 	return grpc.Dial("localhost:50051", opts...)
 }
@@ -148,7 +154,7 @@ func getConn(config *configpb.ApiConfig) (*grpc.ClientConn, error) {
 func TestUnaryCall(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			conn, err := getConn(test.apicfg)
+			conn, err := getConn(test.apicfg, t)
 			if err != nil {
 				t.Fatalf("did not connect: %v", err)
 			}
@@ -171,7 +177,7 @@ func TestUnaryCall(t *testing.T) {
 func TestStreamingCall(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			conn, err := getConn(test.apicfg)
+			conn, err := getConn(test.apicfg, t)
 			if err != nil {
 				t.Fatalf("did not connect: %v", err)
 			}
@@ -206,7 +212,7 @@ func TestStreamingCall(t *testing.T) {
 func TestStreamingCallNoResponse(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			conn, err := getConn(test.apicfg)
+			conn, err := getConn(test.apicfg, t)
 			if err != nil {
 				t.Fatalf("did not connect: %v", err)
 			}

@@ -20,16 +20,24 @@ package grpcgcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/grpc/serviceconfig"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/testing/protocmp"
 
+	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	sppb "google.golang.org/genproto/googleapis/spanner/v1"
 )
 
@@ -43,6 +51,8 @@ var currBalancer *gcpBalancer
 // testBuilderWrapper wraps the real gcpBalancerBuilder
 // so it can cache the created balancer object
 type testBuilderWrapper struct {
+	balancer.ConfigParser
+
 	name        string
 	realBuilder *gcpBalancerBuilder
 }
@@ -59,6 +69,10 @@ func (*testBuilderWrapper) Name() string {
 	return Name
 }
 
+func (tb *testBuilderWrapper) ParseConfig(j json.RawMessage) (serviceconfig.LoadBalancingConfig, error) {
+	return tb.realBuilder.ParseConfig(j)
+}
+
 func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.ClientConn {
 	var perRPC credentials.PerRPCCredentials
 	var err error
@@ -71,8 +85,13 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	if err != nil {
 		t.Fatalf("Failed to create credentials: %v", err)
 	}
-	apiConfig, err := ParseAPIConfig("spanner.grpc.config")
+
+	jsonFile, err := ioutil.ReadFile("spanner.grpc.config")
 	if err != nil {
+		t.Fatalf("Failed to read config file: %v", err)
+	}
+	apiConfig := &pb.ApiConfig{}
+	if err := protojson.Unmarshal(jsonFile, apiConfig); err != nil {
 		t.Fatalf("Failed to parse api config file: %v", err)
 	}
 	apiConfig.GetChannelPool().MaxSize = maxSize
@@ -81,17 +100,22 @@ func initClientConn(t *testing.T, maxSize uint32, maxStreams uint32) *grpc.Clien
 	// Register test builder wrapper
 	balancer.Register(&testBuilderWrapper{
 		name:        Name,
-		realBuilder: &gcpBalancerBuilder{name: Name},
+		realBuilder: newBuilder().(*gcpBalancerBuilder),
 	})
 
-	gcpInt := NewGCPInterceptor(apiConfig)
+	c, err := protojson.Marshal(apiConfig)
+	if err != nil {
+		t.Fatalf("cannot json encode config: %v", err)
+	}
+
 	conn, err := grpc.Dial(
 		target,
 		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
 		grpc.WithPerRPCCredentials(perRPC),
-		grpc.WithBalancerName(Name),
-		grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor),
-		grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor),
+		grpc.WithDisableServiceConfig(),
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, Name, string(c))),
+		grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor),
+		grpc.WithStreamInterceptor(GCPStreamClientInterceptor),
 	)
 	if err != nil {
 		t.Errorf("Creation of ClientConn failed due to error: %s", err.Error())
@@ -126,6 +150,27 @@ func getSubconnRefs() []*subConnRef {
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+func TestConfigParsedFromJson(t *testing.T) {
+	conn := initClientConn(t, 10, 50)
+	defer conn.Close()
+
+	jsonFile, err := ioutil.ReadFile("spanner.grpc.config")
+	if err != nil {
+		t.Fatalf("Failed to read config file: %v", err)
+	}
+	apiConfig := &pb.ApiConfig{}
+	if err := protojson.Unmarshal(jsonFile, apiConfig); err != nil {
+		t.Fatalf("Failed to parse api config file: %v", err)
+	}
+	apiConfig.GetChannelPool().MinSize = 1
+	apiConfig.GetChannelPool().MaxSize = 10
+	apiConfig.GetChannelPool().MaxConcurrentStreamsLowWatermark = 50
+
+	if diff := cmp.Diff(apiConfig, currBalancer.cfg.ApiConfig, protocmp.Transform()); diff != "" {
+		t.Errorf("gcp_balancer config has unexpected difference (-want +got):\n%v", diff)
+	}
 }
 
 func TestSessionManagement(t *testing.T) {

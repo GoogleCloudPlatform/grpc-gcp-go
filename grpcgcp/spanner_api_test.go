@@ -34,10 +34,11 @@ import (
 	"cloud.google.com/go/spanner"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	dbapi "cloud.google.com/go/spanner/admin/database/apiv1"
 	instapi "cloud.google.com/go/spanner/admin/instance/apiv1"
-	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
+	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	apb "google.golang.org/genproto/googleapis/spanner/admin/database/v1"
 	ipb "google.golang.org/genproto/googleapis/spanner/admin/instance/v1"
 )
@@ -207,34 +208,34 @@ func insertTestRecord(ctx context.Context) error {
 }
 
 func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
-	apiConfig := &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
+	apiConfig := &pb.ApiConfig{
+		ChannelPool: &pb.ChannelPoolConfig{
 			MaxSize:                          10,
 			MaxConcurrentStreamsLowWatermark: 1,
 		},
-		Method: []*configpb.MethodConfig{
-			&configpb.MethodConfig{
+		Method: []*pb.MethodConfig{
+			{
 				Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BIND,
+				Affinity: &pb.AffinityConfig{
+					Command:     pb.AffinityConfig_BIND,
 					AffinityKey: "name",
 				},
 			},
-			&configpb.MethodConfig{
+			{
 				Name: []string{"/google.spanner.v1.Spanner/GetSession"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BOUND,
+				Affinity: &pb.AffinityConfig{
+					Command:     pb.AffinityConfig_BOUND,
 					AffinityKey: "name",
 				},
 			},
-			&configpb.MethodConfig{
+			{
 				Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_UNBIND,
+				Affinity: &pb.AffinityConfig{
+					Command:     pb.AffinityConfig_UNBIND,
 					AffinityKey: "name",
 				},
 			},
-			&configpb.MethodConfig{
+			{
 				Name: []string{
 					"/google.spanner.v1.Spanner/ExecuteSql",
 					"/google.spanner.v1.Spanner/ExecuteStreamingSql",
@@ -246,18 +247,24 @@ func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
 					"/google.spanner.v1.Spanner/PartitionQuery",
 					"/google.spanner.v1.Spanner/PartitionRead",
 				},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BOUND,
+				Affinity: &pb.AffinityConfig{
+					Command:     pb.AffinityConfig_BOUND,
 					AffinityKey: "session",
 				},
 			},
 		},
 	}
-	gcpInt := NewGCPInterceptor(apiConfig)
+
+	c, err := protojson.Marshal(apiConfig)
+	if err != nil {
+		t.Fatalf("cannot json encode config: %v", err)
+	}
+
 	opts := []option.ClientOption{
-		option.WithGRPCDialOption(grpc.WithBalancerName(Name)),
-		option.WithGRPCDialOption(grpc.WithUnaryInterceptor(gcpInt.GCPUnaryClientInterceptor)),
-		option.WithGRPCDialOption(grpc.WithStreamInterceptor(gcpInt.GCPStreamClientInterceptor)),
+		option.WithGRPCDialOption(grpc.WithDisableServiceConfig()),
+		option.WithGRPCDialOption(grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, Name, string(c)))),
+		option.WithGRPCDialOption(grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor)),
+		option.WithGRPCDialOption(grpc.WithStreamInterceptor(GCPStreamClientInterceptor)),
 	}
 	// NumChannels in ClientConfig represents the number of ClientConns created by grpc.
 	// We should set it to 1 since we are using one clientconn with pool of subconns.
