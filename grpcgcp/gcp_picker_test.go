@@ -28,6 +28,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/resolver"
@@ -36,55 +37,149 @@ import (
 )
 
 type testMsg struct {
-	Key         string
-	NestedField *nestedField
+	Key            string
+	NestedField    *nestedField
+	RepeatedField  []*nestedField
+	RepeatedString []string
+	RepeatedInt    []int
 }
 
 type nestedField struct {
-	Key string
+	Key            string
+	RepeatedString []string
 }
 
 func TestGetKeyFromMessage(t *testing.T) {
-	expectedRes := "test_key"
+	expectedRes := []string{"test_key"}
 	msg := &testMsg{
-		Key: expectedRes,
+		Key: "test_key",
 		NestedField: &nestedField{
 			Key: "test_nested_key",
 		},
 	}
 	locator := "key"
-	res, err := getAffinityKeyFromMessage(locator, msg)
+	res, err := getAffinityKeysFromMessage(locator, msg)
 	if err != nil {
-		t.Fatalf("getAffinityKeyFromMessage failed: %v", err)
+		t.Fatalf("getAffinityKeysFromMessage failed: %v", err)
 	}
-	if res != expectedRes {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong key: %v, want: %v", res, expectedRes)
+	if diff := cmp.Diff(expectedRes, res); diff != "" {
+		t.Fatalf("getAffinityKeysFromMessage returns unexpected diff (-want, +got):\n%s", diff)
 	}
 }
 
 func TestGetNestedKeyFromMessage(t *testing.T) {
-	expectedRes := "test_nested_key"
+	expectedRes := []string{"test_nested_key"}
 	msg := &testMsg{
 		Key: "test_key",
 		NestedField: &nestedField{
-			Key: expectedRes,
+			Key: "test_nested_key",
 		},
 	}
 	locator := "nestedField.key"
-	res, err := getAffinityKeyFromMessage(locator, msg)
+	res, err := getAffinityKeysFromMessage(locator, msg)
 	if err != nil {
-		t.Fatalf("getAffinityKeyFromMessage failed: %v", err)
+		t.Fatalf("getAffinityKeysFromMessage failed: %v", err)
 	}
-	if res != expectedRes {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong key: %v, want: %v", res, expectedRes)
+	if diff := cmp.Diff(expectedRes, res); diff != "" {
+		t.Fatalf("getAffinityKeysFromMessage returns unexpected diff (-want, +got):\n%s", diff)
+	}
+}
+
+func TestGetListOfKeysFromRepeatedStruct(t *testing.T) {
+	msg := &testMsg{
+		Key: "test_key",
+		RepeatedField: []*nestedField{
+			{
+				Key: "key1",
+			},
+			{
+				Key: "key2",
+			},
+		},
+	}
+
+	expected := []string{"key1", "key2"}
+	locator := "repeatedField.key"
+	res, err := getAffinityKeysFromMessage(locator, msg)
+	if err != nil {
+		t.Fatalf("getAffinityKeysFromMessage failed: %v", err)
+	}
+	if diff := cmp.Diff(expected, res); diff != "" {
+		t.Fatalf("getAffinityKeysFromMessage returns unexpected diff (-want, +got):\n%s", diff)
+	}
+}
+
+func TestGetListOfKeysFromRepeatedString(t *testing.T) {
+	msg := &testMsg{
+		Key: "test_key",
+		RepeatedString: []string{
+			"key1",
+			"key2",
+		},
+	}
+
+	expected := []string{"key1", "key2"}
+	locator := "repeatedString"
+	res, err := getAffinityKeysFromMessage(locator, msg)
+	if err != nil {
+		t.Fatalf("getAffinityKeysFromMessage failed: %v", err)
+	}
+	if diff := cmp.Diff(expected, res); diff != "" {
+		t.Fatalf("getAffinityKeysFromMessage returns unexpected diff (-want, +got):\n%s", diff)
+	}
+}
+
+func TestGetListOfKeysFromRepeatedStringInRepeatedStruct(t *testing.T) {
+	msg := &testMsg{
+		Key: "test_key",
+		RepeatedField: []*nestedField{
+			{
+				RepeatedString: []string{"key1", "key2"},
+			},
+			{
+				RepeatedString: []string{"key3", "key4"},
+			},
+		},
+	}
+
+	expected := []string{"key1", "key2", "key3", "key4"}
+	locator := "repeatedField.repeatedString"
+	res, err := getAffinityKeysFromMessage(locator, msg)
+	if err != nil {
+		t.Fatalf("getAffinityKeysFromMessage failed: %v", err)
+	}
+	if diff := cmp.Diff(expected, res); diff != "" {
+		t.Fatalf("getAffinityKeysFromMessage returns unexpected diff (-want, +got):\n%s", diff)
+	}
+}
+
+func TestGetListOfKeysFromRepeatedInt(t *testing.T) {
+	msg := &testMsg{
+		Key:         "test_key",
+		RepeatedInt: []int{42, 43},
+	}
+
+	locator := "repeatedInt"
+	expectedErr := fmt.Sprintf("cannot get string value from %q which is \"int\"", locator)
+	_, err := getAffinityKeysFromMessage(locator, msg)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 }
 
 func TestGetKeyFromNilMessage(t *testing.T) {
-	expectedErr := fmt.Sprintf("cannot get string value from nil message")
-	_, err := getAffinityKeyFromMessage("key", nil)
+	expectedErr := "path \"key\" traversal error: cannot lookup field \"key\" (index 0 in the path) in a \"invalid\" value"
+	_, err := getAffinityKeysFromMessage("key", nil)
 	if err == nil || err.Error() != expectedErr {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+}
+
+func TestGetKeyFromNonStructMessage(t *testing.T) {
+	expectedErr := "path \"key\" traversal error: cannot lookup field \"key\" (index 0 in the path) in a \"int\" value"
+	_, err := getAffinityKeysFromMessage("key", 42)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 }
 
@@ -94,27 +189,61 @@ func TestInvalidKeyLocator(t *testing.T) {
 		NestedField: &nestedField{
 			Key: "test_nested_key",
 		},
+		RepeatedField: []*nestedField{
+			{
+				Key:            "test_nested_repeated_key1",
+				RepeatedString: []string{"test_nested_repeated_key2"},
+			},
+		},
 	}
 
 	locator := "invalidLocator"
-	expectedErr := fmt.Sprintf("Cannot get string value from %v", locator)
-	_, err := getAffinityKeyFromMessage(locator, msg)
+	expectedErr := fmt.Sprintf("cannot get string value from %q which is \"invalid\"", locator)
+	_, err := getAffinityKeysFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+
+	locator = "nestedField.invalidLocator"
+	expectedErr = fmt.Sprintf("cannot get string value from %q which is \"invalid\"", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+
+	locator = "repeatedField.invalidLocator"
+	expectedErr = fmt.Sprintf("cannot get string value from %q which is \"invalid\"", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+
+	locator = "repeatedField.repeatedString.invalidLocator"
+	expectedErr = fmt.Sprintf("path %q traversal error: cannot lookup field \"invalidLocator\" (index 2 in the path) in a \"string\" value", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 
 	locator = "key.invalidLocator"
-	expectedErr = fmt.Sprintf("Invalid locator path for %v", locator)
-	_, err = getAffinityKeyFromMessage(locator, msg)
+	expectedErr = fmt.Sprintf("path %q traversal error: cannot lookup field \"invalidLocator\" (index 1 in the path) in a \"string\" value", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 
 	locator = "nestedField.key.invalidLocator"
-	expectedErr = fmt.Sprintf("Invalid locator path for %v", locator)
-	_, err = getAffinityKeyFromMessage(locator, msg)
+	expectedErr = fmt.Sprintf("path %q traversal error: cannot lookup field \"invalidLocator\" (index 2 in the path) in a \"string\" value", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
 	if err == nil || err.Error() != expectedErr {
-		t.Fatalf("getAffinityKeyFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
+	}
+
+	locator = "repeatedField.key.invalidLocator"
+	expectedErr = fmt.Sprintf("path %q traversal error: cannot lookup field \"invalidLocator\" (index 2 in the path) in a \"string\" value", locator)
+	_, err = getAffinityKeysFromMessage(locator, msg)
+	if err == nil || err.Error() != expectedErr {
+		t.Fatalf("getAffinityKeysFromMessage returns wrong err: %v, want: %v", err, expectedErr)
 	}
 }
 
