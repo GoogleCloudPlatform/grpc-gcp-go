@@ -63,12 +63,12 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		locator = mcfg.GetAffinityKey()
 		cmd = mcfg.GetCommand()
 		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
-			a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
+			a, err := getAffinityKeysFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
 				return balancer.PickResult{}, fmt.Errorf(
 					"failed to retrieve affinity key from request message: %v", err)
 			}
-			boundKey = a
+			boundKey = a[0]
 		}
 	}
 
@@ -91,9 +91,11 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 
 		switch cmd {
 		case grpc_gcp.AffinityConfig_BIND:
-			bindKey, err := getAffinityKeyFromMessage(locator, gcpCtx.replyMsg)
+			bindKeys, err := getAffinityKeysFromMessage(locator, gcpCtx.replyMsg)
 			if err == nil {
-				p.gb.bindSubConn(bindKey, scRef.subConn)
+				for _, bk := range bindKeys {
+					p.gb.bindSubConn(bk, scRef.subConn)
+				}
 			}
 		case grpc_gcp.AffinityConfig_UNBIND:
 			p.gb.unbindSubConn(boundKey)
@@ -189,36 +191,50 @@ func (p *gcpPicker) getLeastBusySubConnRef() (*subConnRef, error) {
 	return minScRef, nil
 }
 
-// getAffinityKeyFromMessage retrieves the affinity key from proto message using
+func keysFromMessage(val reflect.Value, path []string, start int) ([]string, error) {
+	if val.Kind() == reflect.Pointer || val.Kind() == reflect.Interface {
+		val = val.Elem()
+	}
+
+	if len(path) == start {
+		if val.Kind() != reflect.String {
+			return nil, fmt.Errorf("cannot get string value from %q which is %q", strings.Join(path, "."), val.Kind())
+		}
+		return []string{val.String()}, nil
+	}
+
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("path %q traversal error: cannot lookup field %q (index %d in the path) in a %q value", strings.Join(path, "."), path[start], start, val.Kind())
+	}
+	valField := val.FieldByName(strings.Title(path[start]))
+
+	if valField.Kind() != reflect.Slice {
+		return keysFromMessage(valField, path, start+1)
+	}
+
+	keys := []string{}
+	for i := 0; i < valField.Len(); i++ {
+		kk, err := keysFromMessage(valField.Index(i), path, start+1)
+		if err != nil {
+			return keys, err
+		}
+		keys = append(keys, kk...)
+	}
+	return keys, nil
+}
+
+// getAffinityKeysFromMessage retrieves the affinity key(s) from proto message using
 // the key locator defined in the affinity config.
-func getAffinityKeyFromMessage(
+func getAffinityKeysFromMessage(
 	locator string,
 	msg interface{},
-) (affinityKey string, err error) {
+) (affinityKeys []string, err error) {
 	names := strings.Split(locator, ".")
 	if len(names) == 0 {
-		return "", fmt.Errorf("Empty affinityKey locator")
+		return nil, fmt.Errorf("empty affinityKey locator")
 	}
 
-	if msg == nil {
-		return "", fmt.Errorf("cannot get string value from nil message")
-	}
-	val := reflect.ValueOf(msg).Elem()
-
-	// Fields in names except for the last one.
-	for _, name := range names[:len(names)-1] {
-		valField := val.FieldByName(strings.Title(name))
-		if valField.Kind() != reflect.Ptr && valField.Kind() != reflect.Struct {
-			return "", fmt.Errorf("Invalid locator path for %v", locator)
-		}
-		val = valField.Elem()
-	}
-
-	valField := val.FieldByName(strings.Title(names[len(names)-1]))
-	if valField.Kind() != reflect.String {
-		return "", fmt.Errorf("Cannot get string value from %v", locator)
-	}
-	return valField.String(), nil
+	return keysFromMessage(reflect.ValueOf(msg), names, 0)
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().
