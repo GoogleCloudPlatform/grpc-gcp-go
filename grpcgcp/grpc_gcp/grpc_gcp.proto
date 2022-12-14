@@ -55,6 +55,24 @@ message ChannelPoolConfig {
   // and rather slow connection establishing or during incidents when new
   // connections fail but existing connections still operate.
   bool fallback_to_ready = 5;
+
+  // Enables per channel unresponsive connection detection if > 0 and unresponsive_calls > 0.
+  // If enabled and more than unresponsive_detection_ms passed since the last response from the server,
+  // and >= unresponsive_calls RPC calls (started after last response from the server) timed-out on the client side,
+  // then the connection of that channel will be gracefully refreshed. I.e., a new connection will be created for
+  // that channel and after the new connection is ready it will replace the old connection. The calls on the old
+  // connection will not be interrupted. The unresponsive_detection_ms will be doubled every consecutive refresh
+  // if no response from the server is received.
+  uint32 unresponsive_detection_ms = 6;
+
+  // Enables per channel unresponsive connection detection if > 0 and unresponsive_detection_ms > 0.
+  // If enabled and more than unresponsive_detection_ms passed since the last response from the server,
+  // and >= unresponsive_calls RPC calls (started after last response from the server) timed-out on the client side,
+  // then the connection of that channel will be gracefully refreshed. I.e., a new connection will be created for
+  // that channel and after the new connection is ready it will replace the old connection. The calls on the old
+  // connection will not be interrupted. The unresponsive_detection_ms will be doubled every consecutive refresh
+  // if no response from the server is received.
+  uint32 unresponsive_calls = 7;
 }
 
 message MethodConfig {

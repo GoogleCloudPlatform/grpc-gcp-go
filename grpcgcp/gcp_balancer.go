@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
@@ -65,13 +66,14 @@ func (bb *gcpBalancerBuilder) Build(
 	opt balancer.BuildOptions,
 ) balancer.Balancer {
 	return &gcpBalancer{
-		cc:          cc,
-		methodCfg:   make(map[string]*pb.AffinityConfig),
-		affinityMap: make(map[string]balancer.SubConn),
-		fallbackMap: make(map[string]balancer.SubConn),
-		scRefs:      make(map[balancer.SubConn]*subConnRef),
-		scStates:    make(map[balancer.SubConn]connectivity.State),
-		csEvltr:     &connectivityStateEvaluator{},
+		cc:               cc,
+		methodCfg:        make(map[string]*pb.AffinityConfig),
+		affinityMap:      make(map[string]balancer.SubConn),
+		fallbackMap:      make(map[string]balancer.SubConn),
+		scRefs:           make(map[balancer.SubConn]*subConnRef),
+		scStates:         make(map[balancer.SubConn]connectivity.State),
+		refreshingScRefs: make(map[balancer.SubConn]*subConnRef),
+		csEvltr:          &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
 		// may call UpdateBalancerState with this picker.
@@ -147,8 +149,12 @@ func (cse *connectivityStateEvaluator) recordTransition(
 // connectivity state, affinity count and streams count.
 type subConnRef struct {
 	subConn     balancer.SubConn
-	affinityCnt int32 // Keeps track of the number of keys bound to the subConn
-	streamsCnt  int32 // Keeps track of the number of streams opened on the subConn
+	affinityCnt int32     // Keeps track of the number of keys bound to the subConn.
+	streamsCnt  int32     // Keeps track of the number of streams opened on the subConn.
+	lastResp    time.Time // Timestamp of the last response from the server.
+	deCalls     uint32    // Keeps track of deadline exceeded calls since last response.
+	refreshing  bool      // If this subconn is in the process of refreshing.
+	refreshCnt  uint32    // Number of refreshes since last response.
 }
 
 func (ref *subConnRef) getAffinityCnt() int32 {
@@ -175,6 +181,16 @@ func (ref *subConnRef) streamsDecr() {
 	atomic.AddInt32(&ref.streamsCnt, -1)
 }
 
+func (ref *subConnRef) deCallsInc() uint32 {
+	return atomic.AddUint32(&ref.deCalls, 1)
+}
+
+func (ref *subConnRef) gotResp() {
+	ref.lastResp = time.Now()
+	atomic.StoreUint32(&ref.deCalls, 0)
+	ref.refreshCnt = 0
+}
+
 type gcpBalancer struct {
 	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
 
@@ -191,6 +207,11 @@ type gcpBalancer struct {
 	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
+
+	// Map from a fresh SubConn to the subConnRef where we want to refresh subConn.
+	refreshingScRefs map[balancer.SubConn]*subConnRef
+	// Unresponsive detection enabled flag.
+	unresponsiveDetection bool
 
 	picker balancer.Picker
 }
@@ -232,6 +253,7 @@ func (gb *gcpBalancer) initializeConfig(cfg *GcpBalancerConfig) {
 		}
 	}
 	gb.methodCfg = mp
+	gb.unresponsiveDetection = cp.GetUnresponsiveCalls() > 0 && cp.GetUnresponsiveDetectionMs() > 0
 	gb.enforceMinSize()
 }
 
@@ -312,7 +334,8 @@ func (gb *gcpBalancer) addSubConn() {
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
-		subConn: sc,
+		subConn:  sc,
+		lastResp: time.Now(),
 	}
 	gb.scStates[sc] = connectivity.Idle
 	sc.Connect()
@@ -393,6 +416,29 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 	gb.mu.Lock()
 	defer gb.mu.Unlock()
 	s := scs.ConnectivityState
+
+	if scRef, found := gb.refreshingScRefs[sc]; found {
+		grpclog.Infof("grpcgcp.gcpBalancer: handle replacement SubConn state change: %p, %v", sc, s)
+		if s != connectivity.Ready {
+			// Ignore the replacement sc until it's ready.
+			return
+		}
+
+		// Replace SubConn of the scRef with the fresh SubConn (sc) concluding
+		// the refresh process initiated by refresh(*subConnRef).
+		oldSc := scRef.subConn
+		gb.scStates[sc] = gb.scStates[oldSc]
+		delete(gb.refreshingScRefs, sc)
+		delete(gb.scRefs, oldSc)
+		gb.scRefs[sc] = scRef
+		scRef.subConn = sc
+		scRef.deCalls = 0
+		scRef.lastResp = time.Now()
+		scRef.refreshing = false
+		scRef.refreshCnt++
+		gb.cc.RemoveSubConn(oldSc)
+	}
+
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 
 	oldS, ok := gb.scStates[sc]
@@ -445,6 +491,30 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 			Picker:            gb.picker,
 		})
 	}
+}
+
+// refresh initiates a new SubConn for a specific subConnRef and starts connecting.
+// If the refresh is already initiated for the ref, then this is a no-op.
+func (gb *gcpBalancer) refresh(ref *subConnRef) {
+	if ref.refreshing {
+		return
+	}
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+	if ref.refreshing {
+		return
+	}
+	ref.refreshing = true
+	sc, err := gb.cc.NewSubConn(
+		gb.addrs,
+		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},
+	)
+	if err != nil {
+		grpclog.Errorf("grpcgcp.gcpBalancer: failed to create a replacement SubConn with NewSubConn: %v", err)
+		return
+	}
+	gb.refreshingScRefs[sc] = ref
+	sc.Connect()
 }
 
 func (gb *gcpBalancer) Close() {
