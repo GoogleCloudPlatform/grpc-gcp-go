@@ -73,6 +73,9 @@ message ChannelPoolConfig {
   // connection will not be interrupted. The unresponsive_detection_ms will be doubled every consecutive refresh
   // if no response from the server is received.
   uint32 unresponsive_calls = 7;
+
+  // Enables round-robin for binding calls.
+  bool round_robin_bind = 8;
 }
 
 message MethodConfig {

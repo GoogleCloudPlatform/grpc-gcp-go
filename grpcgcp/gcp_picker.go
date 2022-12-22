@@ -59,10 +59,10 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	locator := ""
 	var cmd grpc_gcp.AffinityConfig_Command
 
-	if mcfg, ok := p.gb.methodCfg[info.FullMethodName]; ok && hasGcpCtx {
+	if mcfg, ok := p.gb.methodCfg[info.FullMethodName]; ok {
 		locator = mcfg.GetAffinityKey()
 		cmd = mcfg.GetCommand()
-		if cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND {
+		if hasGcpCtx && (cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND) {
 			a, err := getAffinityKeysFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
 				return balancer.PickResult{}, fmt.Errorf(
@@ -72,7 +72,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		}
 	}
 
-	scRef, err := p.getAndIncrementSubConnRef(boundKey)
+	scRef, err := p.getAndIncrementSubConnRef(boundKey, cmd)
 	if err != nil {
 		return balancer.PickResult{}, err
 	}
@@ -136,10 +136,16 @@ func (p *gcpPicker) detectUnresponsive(ctx context.Context, scRef *subConnRef, c
 	}
 }
 
-func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string) (*subConnRef, error) {
+func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	scRef, err := p.getSubConnRef(boundKey)
+	var scRef *subConnRef
+	var err error
+	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetRoundRobinBind() {
+		scRef = p.gb.getSubConnRoundRobin()
+	} else {
+		scRef, err = p.getSubConnRef(boundKey)
+	}
 	if err != nil {
 		return nil, err
 	}
