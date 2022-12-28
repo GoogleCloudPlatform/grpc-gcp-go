@@ -326,7 +326,7 @@ func TestRoundRobinForBind(t *testing.T) {
 					MinSize:                          3,
 					MaxSize:                          10,
 					MaxConcurrentStreamsLowWatermark: 10,
-					RoundRobinBind:                   true,
+					BindPickStrategy:                 pb.ChannelPoolConfig_ROUND_ROBIN,
 				},
 				Method: []*pb.MethodConfig{
 					{

@@ -141,7 +141,7 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.Affi
 	defer p.mu.Unlock()
 	var scRef *subConnRef
 	var err error
-	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetRoundRobinBind() {
+	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
 		scRef = p.gb.getSubConnRoundRobin()
 	} else {
 		scRef, err = p.getSubConnRef(boundKey)
