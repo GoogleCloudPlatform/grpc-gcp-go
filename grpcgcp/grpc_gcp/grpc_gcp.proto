@@ -73,6 +73,25 @@ message ChannelPoolConfig {
   // connection will not be interrupted. The unresponsive_detection_ms will be doubled every consecutive refresh
   // if no response from the server is received.
   uint32 unresponsive_calls = 7;
+
+  // A selection of strategies for picking a channel for a call with BIND command.
+  enum BindPickStrategy {
+    // No preference -- picking a channel for a BIND call will be no different
+    // than for any other calls.
+    UNSPECIFIED = 0;
+
+    // A channel with the least active streams at the moment of a BIND call
+    // initiation will be picked.
+    LEAST_ACTIVE_STREAMS = 1;
+
+    // Cycle through channels created by the BIND call initiation. I. e. pick
+    // a channel in a round-robin manner. Note that some channels may be
+    // skipped during channel pool resize.
+    ROUND_ROBIN = 2;
+  }
+
+  // The strategy for picking a channel for a call with BIND command.
+  BindPickStrategy bind_pick_strategy = 8;
 }
 
 message MethodConfig {

@@ -299,3 +299,122 @@ func TestRefreshesSubConnsWhenUnresponsive(t *testing.T) {
 		t.Fatalf("Unexpected number of subConns: %d, want %d", got, want)
 	}
 }
+
+func TestRoundRobinForBind(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	// A slice to store all SubConns created by gcpBalancer's ClientConn.
+	scs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().MinTimes(1)
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		scs = append(scs, newSC)
+		return newSC, nil
+	}).Times(4)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GcpBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          3,
+					MaxSize:                          10,
+					MaxConcurrentStreamsLowWatermark: 10,
+					BindPickStrategy:                 pb.ChannelPoolConfig_ROUND_ROBIN,
+				},
+				Method: []*pb.MethodConfig{
+					{
+						Name: []string{"dummyService/createSession"},
+						Affinity: &pb.AffinityConfig{
+							Command:     pb.AffinityConfig_BIND,
+							AffinityKey: "dummykey",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if want := 3; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+
+	// Make subConn 1 ready.
+	b.UpdateSubConnState(scs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// Expect picker will pick the only ready subconn for non-binding call. This call will increment the counter for
+	// active streams on subconn 1 which helps us test round-robin for binging calls below.
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Expect 0 subconn because the picker should pick even non-ready subcons for binding calls in a round-robin manner.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[0]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[2]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Cycles to the first subconn.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[0]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Create more regular calls to reach the limit to spawn new subconn.
+	for i := 0; i < 7; i++ {
+		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
+		if want := scs[1]; pr.SubConn != want || err != nil {
+			t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+		}
+	}
+	// This call triggers new subconn creation.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
+	if wantErr := balancer.ErrNoSubConnAvailable; err != wantErr {
+		t.Fatalf("gcpPicker.Pick returns %v, _, %v, want: nil, _, %v", pr.SubConn, err, wantErr)
+	}
+
+	// The first binding call shifts to 1 because the divisor for the counter changes from 3 to 4.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[2]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Extends to newly created subconn.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[3]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Cycles to the first subconn.
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
+	if want := scs[0]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+}

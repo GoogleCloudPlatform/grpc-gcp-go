@@ -73,6 +73,8 @@ func (bb *gcpBalancerBuilder) Build(
 		scRefs:           make(map[balancer.SubConn]*subConnRef),
 		scStates:         make(map[balancer.SubConn]connectivity.State),
 		refreshingScRefs: make(map[balancer.SubConn]*subConnRef),
+		scRefList:        []*subConnRef{},
+		rrRefId:          ^uint32(0),
 		csEvltr:          &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
@@ -207,6 +209,8 @@ type gcpBalancer struct {
 	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
+	scRefList   []*subConnRef
+	rrRefId     uint32
 
 	// Map from a fresh SubConn to the subConnRef where we want to refresh subConn.
 	refreshingScRefs map[balancer.SubConn]*subConnRef
@@ -338,6 +342,7 @@ func (gb *gcpBalancer) addSubConn() {
 		lastResp: time.Now(),
 	}
 	gb.scStates[sc] = connectivity.Idle
+	gb.scRefList = append(gb.scRefList, gb.scRefs[sc])
 	sc.Connect()
 }
 
@@ -368,6 +373,13 @@ func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
 		return gb.scRefs[sc], true
 	}
 	return nil, false
+}
+
+func (gb *gcpBalancer) getSubConnRoundRobin() *subConnRef {
+	if len(gb.scRefList) == 0 {
+		gb.newSubConn()
+	}
+	return gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
 }
 
 // bindSubConn binds the given affinity key to an existing subConnRef.
