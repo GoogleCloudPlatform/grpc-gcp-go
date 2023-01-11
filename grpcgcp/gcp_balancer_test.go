@@ -2,15 +2,19 @@ package grpcgcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/serviceconfig"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/testing/protocmp"
 
@@ -40,6 +44,33 @@ var testApiConfig = &pb.ApiConfig{
 			},
 		},
 	},
+}
+
+var currBalancer *gcpBalancer
+
+// testBuilderWrapper wraps the real gcpBalancerBuilder
+// so it can cache the created balancer object
+type testBuilderWrapper struct {
+	balancer.ConfigParser
+
+	name        string
+	realBuilder *gcpBalancerBuilder
+}
+
+func (tb *testBuilderWrapper) Build(
+	cc balancer.ClientConn,
+	opt balancer.BuildOptions,
+) balancer.Balancer {
+	currBalancer = tb.realBuilder.Build(cc, opt).(*gcpBalancer)
+	return currBalancer
+}
+
+func (*testBuilderWrapper) Name() string {
+	return Name
+}
+
+func (tb *testBuilderWrapper) ParseConfig(j json.RawMessage) (serviceconfig.LoadBalancingConfig, error) {
+	return tb.realBuilder.ParseConfig(j)
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -126,6 +157,36 @@ func TestParseConfig(t *testing.T) {
 	}
 }
 
+func TestParseConfigFromDial(t *testing.T) {
+	// Register test builder wrapper.
+	balancer.Register(&testBuilderWrapper{
+		name:        Name,
+		realBuilder: newBuilder().(*gcpBalancerBuilder),
+	})
+
+	json, err := protojson.Marshal(testApiConfig)
+	if err != nil {
+		t.Fatalf("cannot encode ApiConfig: %v", err)
+	}
+
+	conn, err := grpc.Dial(
+		"localhost:433",
+		grpc.WithInsecure(),
+		grpc.WithDisableServiceConfig(),
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, Name, string(json))),
+		grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor),
+		grpc.WithStreamInterceptor(GCPStreamClientInterceptor),
+	)
+	if err != nil {
+		t.Errorf("Creation of ClientConn failed due to error: %s", err.Error())
+	}
+	defer conn.Close()
+
+	if diff := cmp.Diff(testApiConfig, currBalancer.cfg.ApiConfig, protocmp.Transform()); diff != "" {
+		t.Errorf("gcp_balancer config has unexpected difference (-want +got):\n%v", diff)
+	}
+}
+
 func TestCreatesMinSubConns(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
@@ -158,6 +219,81 @@ func TestCreatesMinSubConns(t *testing.T) {
 	if want := 3; len(b.scRefs) != want {
 		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
 	}
+	for _, v := range newSCs {
+		if _, ok := b.scRefs[v]; !ok {
+			t.Fatalf("Created SubConn is not stored in gcpBalancer.scRefs")
+		}
+	}
+}
+
+func TestCreatesUpToMaxSubConns(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	newSCs := []*mocks.MockSubConn{}
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().AnyTimes()
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		newSCs = append(newSCs, newSC)
+		return newSC, nil
+	}).Times(5)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GcpBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          3,
+					MaxSize:                          5,
+					MaxConcurrentStreamsLowWatermark: 1,
+				},
+			},
+		},
+	})
+
+	if want := 3; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+	for _, v := range newSCs {
+		if _, ok := b.scRefs[v]; !ok {
+			t.Fatalf("Created SubConn is not stored in gcpBalancer.scRefs")
+		}
+		// Simulate ready.
+		b.UpdateSubConnState(v, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}
+
+	// Simulate more than MaxSize calls.
+	for i := 0; i < 10; i++ {
+		b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: context.TODO()})
+	}
+
+	// Should create only one new subconn because we skip new subconn creation while any is still connecting.
+	// This is done to prevent scaling up the pool prematurely.
+	if want := 4; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+
+	// Simulate more than MaxSize calls. Now with simulating any new subconn moving to ready state.
+	for i := 0; i < 10; i++ {
+		if _, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: context.TODO()}); err != nil {
+			// Simulate a new subconn is ready.
+			for _, v := range newSCs {
+				if b.scStates[v] != connectivity.Ready {
+					b.UpdateSubConnState(v, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+				}
+			}
+		}
+	}
+
+	if want := 5; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+
 	for _, v := range newSCs {
 		if _, ok := b.scRefs[v]; !ok {
 			t.Fatalf("Created SubConn is not stored in gcpBalancer.scRefs")
@@ -382,11 +518,15 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
+	// Bring other subconns to ready.
+	b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
 	// Create more regular calls to reach the limit to spawn new subconn.
-	for i := 0; i < 7; i++ {
-		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
-		if want := scs[1]; pr.SubConn != want || err != nil {
-			t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	for i := 0; i < 24; i++ {
+		_, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
+		if err != nil {
+			t.Fatalf("gcpPicker.Pick returns error: %v, want: nil", err)
 		}
 	}
 	// This call triggers new subconn creation.

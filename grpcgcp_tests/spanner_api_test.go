@@ -16,7 +16,7 @@
  *
  */
 
-package grpcgcp
+package grpcgcp_tests
 
 import (
 	"context"
@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/spanner"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -210,8 +211,9 @@ func insertTestRecord(ctx context.Context) error {
 func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
 	apiConfig := &pb.ApiConfig{
 		ChannelPool: &pb.ChannelPoolConfig{
-			MaxSize:                          10,
-			MaxConcurrentStreamsLowWatermark: 1,
+			MinSize:          4,
+			MaxSize:          4,
+			BindPickStrategy: pb.ChannelPoolConfig_ROUND_ROBIN,
 		},
 		Method: []*pb.MethodConfig{
 			{
@@ -262,9 +264,9 @@ func initSpannerClient(t *testing.T, ctx context.Context) *spanner.Client {
 
 	opts := []option.ClientOption{
 		option.WithGRPCDialOption(grpc.WithDisableServiceConfig()),
-		option.WithGRPCDialOption(grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, Name, string(c)))),
-		option.WithGRPCDialOption(grpc.WithUnaryInterceptor(GCPUnaryClientInterceptor)),
-		option.WithGRPCDialOption(grpc.WithStreamInterceptor(GCPStreamClientInterceptor)),
+		option.WithGRPCDialOption(grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, grpcgcp.Name, string(c)))),
+		option.WithGRPCDialOption(grpc.WithUnaryInterceptor(grpcgcp.GCPUnaryClientInterceptor)),
+		option.WithGRPCDialOption(grpc.WithStreamInterceptor(grpcgcp.GCPStreamClientInterceptor)),
 	}
 	// NumChannels in ClientConfig represents the number of ClientConns created by grpc.
 	// We should set it to 1 since we are using one clientconn with pool of subconns.

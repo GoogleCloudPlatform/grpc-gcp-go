@@ -347,6 +347,93 @@ func TestPickNewSubConn(t *testing.T) {
 	}
 }
 
+func TestBindSubConn(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	scBusy := mocks.NewMockSubConn(mockCtrl)
+	scIdle := mocks.NewMockSubConn(mockCtrl)
+	scBusy.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+	scIdle.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+	scBusy.EXPECT().Connect().AnyTimes()
+	scIdle.EXPECT().Connect().AnyTimes()
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mp := make(map[balancer.SubConn]*subConnRef)
+	mp[scBusy] = &subConnRef{
+		subConn:     scBusy,
+		affinityCnt: 0,
+		streamsCnt:  5,
+	}
+	mp[scIdle] = &subConnRef{
+		subConn:     scIdle,
+		affinityCnt: 0,
+		streamsCnt:  0,
+	}
+
+	testMethod := "testBindMethod"
+	gcpcfg := &GcpBalancerConfig{
+		ApiConfig: &pb.ApiConfig{
+			ChannelPool: &pb.ChannelPoolConfig{
+				MaxSize:                          2,
+				MaxConcurrentStreamsLowWatermark: 100,
+			},
+			Method: []*pb.MethodConfig{
+				{
+					Name: []string{testMethod},
+					Affinity: &pb.AffinityConfig{
+						Command:     pb.AffinityConfig_BIND,
+						AffinityKey: "key",
+					},
+				},
+			},
+		},
+	}
+
+	// Simulate a pool with two connections.
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	b.scRefs = mp
+	b.scStates[scBusy] = connectivity.Idle
+	b.scStates[scIdle] = connectivity.Idle
+	// Simulate resolver.
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{
+			Addresses: b.addrs,
+		},
+		BalancerConfig: gcpcfg,
+	})
+
+	// Simulate connections moved to the ready state.
+	b.UpdateSubConnState(scBusy, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(scIdle, balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	// Prepare a bind call context.
+	ctx := context.Background()
+	gcpCtx := &gcpContext{
+		reqMsg: &testMsg{},
+	}
+	ctx = context.WithValue(ctx, gcpKey, gcpCtx)
+
+	// Idle subconn shoud be returned.
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: testMethod, Ctx: ctx})
+	sc := pr.SubConn
+	if sc != scIdle || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", sc, err, scIdle)
+	}
+
+	testKey := "test_key"
+	// Simulate bind call completion.
+	gcpCtx.replyMsg = &testMsg{
+		Key: testKey,
+	}
+	pr.Done(balancer.DoneInfo{})
+
+	// Make sure the key is mapped to the subconn.
+	if mappedSc, ok := b.affinityMap[testKey]; !ok || mappedSc != scIdle {
+		t.Fatalf("b.affinityMap[testKey] returned: %v, %v, want: %v, %v", mappedSc, ok, scIdle, true)
+	}
+}
+
 func TestPickMappedSubConn(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
