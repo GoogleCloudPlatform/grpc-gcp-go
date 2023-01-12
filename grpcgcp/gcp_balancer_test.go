@@ -243,20 +243,22 @@ func TestCreatesUpToMaxSubConns(t *testing.T) {
 
 	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	minSize := 3
+	maxSize := 5
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
 		BalancerConfig: &GcpBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
-					MinSize:                          3,
-					MaxSize:                          5,
+					MinSize:                          uint32(minSize),
+					MaxSize:                          uint32(maxSize),
 					MaxConcurrentStreamsLowWatermark: 1,
 				},
 			},
 		},
 	})
 
-	if want := 3; len(b.scRefs) != want {
+	if want := minSize; len(b.scRefs) != want {
 		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
 	}
 	for _, v := range newSCs {
@@ -268,18 +270,18 @@ func TestCreatesUpToMaxSubConns(t *testing.T) {
 	}
 
 	// Simulate more than MaxSize calls.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < maxSize*2; i++ {
 		b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: context.TODO()})
 	}
 
 	// Should create only one new subconn because we skip new subconn creation while any is still connecting.
 	// This is done to prevent scaling up the pool prematurely.
-	if want := 4; len(b.scRefs) != want {
+	if want := minSize + 1; len(b.scRefs) != want {
 		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
 	}
 
 	// Simulate more than MaxSize calls. Now with simulating any new subconn moving to ready state.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < maxSize*2; i++ {
 		if _, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: context.TODO()}); err != nil {
 			// Simulate a new subconn is ready.
 			for _, v := range newSCs {
@@ -290,7 +292,7 @@ func TestCreatesUpToMaxSubConns(t *testing.T) {
 		}
 	}
 
-	if want := 5; len(b.scRefs) != want {
+	if want := maxSize; len(b.scRefs) != want {
 		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
 	}
 
@@ -454,14 +456,16 @@ func TestRoundRobinForBind(t *testing.T) {
 
 	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	minSize := 3
+	streamsWatermark := 10
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
 		BalancerConfig: &GcpBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
-					MinSize:                          3,
+					MinSize:                          uint32(minSize),
 					MaxSize:                          10,
-					MaxConcurrentStreamsLowWatermark: 10,
+					MaxConcurrentStreamsLowWatermark: uint32(streamsWatermark),
 					BindPickStrategy:                 pb.ChannelPoolConfig_ROUND_ROBIN,
 				},
 				Method: []*pb.MethodConfig{
@@ -477,7 +481,7 @@ func TestRoundRobinForBind(t *testing.T) {
 		},
 	})
 
-	if want := 3; len(b.scRefs) != want {
+	if want := minSize; len(b.scRefs) != want {
 		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
 	}
 
@@ -522,8 +526,8 @@ func TestRoundRobinForBind(t *testing.T) {
 	b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 
-	// Create more regular calls to reach the limit to spawn new subconn.
-	for i := 0; i < 24; i++ {
+	// Create more regular calls to reach the limit (watermark*subconns - 6 calls initiated above) to spawn new subconn.
+	for i := 0; i < streamsWatermark*minSize-6; i++ {
 		_, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
 		if err != nil {
 			t.Fatalf("gcpPicker.Pick returns error: %v, want: nil", err)
