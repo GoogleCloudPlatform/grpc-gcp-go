@@ -319,7 +319,7 @@ func (gb *gcpBalancer) newSubConn() {
 	// there are chances the newly created subconns are still connecting,
 	// we can wait on those new subconns.
 	for _, scState := range gb.scStates {
-		if scState == connectivity.Connecting {
+		if scState == connectivity.Connecting || scState == connectivity.Idle {
 			return
 		}
 	}
