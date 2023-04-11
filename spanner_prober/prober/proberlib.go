@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
+	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	log "github.com/golang/glog"
 	"go.opencensus.io/plugin/ocgrpc"
 	"go.opencensus.io/stats"
@@ -21,10 +23,15 @@ import (
 	"go.opencensus.io/tag"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	gtransport "google.golang.org/api/transport/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	gpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	dbadminpb "google.golang.org/genproto/googleapis/spanner/admin/database/v1"
 	instancepb "google.golang.org/genproto/googleapis/spanner/admin/instance/v1"
 )
@@ -34,6 +41,7 @@ const (
 	// Long running operations retry parameters.
 	baseLRORetryDelay = 200 * time.Millisecond
 	maxLRORetryDelay  = 5 * time.Second
+	scope             = "https://www.googleapis.com/auth/cloud-platform"
 )
 
 var (
@@ -78,7 +86,103 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{resultTag, opNameTag},
 	}
+
+	poolSize = 2
+
+	grpcGcpConfig = &gpb.ApiConfig{
+		ChannelPool: &gpb.ChannelPoolConfig{
+			// Creates a fixed-size gRPC-GCP channel pool.
+			MinSize: uint32(poolSize),
+			MaxSize: uint32(poolSize),
+			// This option repeats(preserves) the strategy used by the Spanner
+			// client to distribute BatchCreateSessions calls across channels.
+			BindPickStrategy: gpb.ChannelPoolConfig_ROUND_ROBIN,
+			// When issuing RPC call within Spanner session fallback to a ready
+			// channel if the channel mapped to the session is not ready.
+			FallbackToReady: true,
+			// Establish a new connection for a channel where
+			// no response/messages were received within last 1 second and
+			// at least 3 RPC calls (started after the last response/message
+			// received) timed out (deadline_exceeded).
+			UnresponsiveDetectionMs: 1000,
+			UnresponsiveCalls:       3,
+		},
+		// Configuration for all Spanner RPCs that create, use or remove
+		// Spanner sessions. gRPC-GCP channel pool uses this configuration
+		// to provide session to channel affinity. If Spanner introduces any new
+		// method that creates/uses/removes sessions, it must be added here.
+		Method: []*gpb.MethodConfig{
+			{
+				Name: []string{"/google.spanner.v1.Spanner/CreateSession"},
+				Affinity: &gpb.AffinityConfig{
+					Command:     gpb.AffinityConfig_BIND,
+					AffinityKey: "name",
+				},
+			},
+			{
+				Name: []string{"/google.spanner.v1.Spanner/BatchCreateSessions"},
+				Affinity: &gpb.AffinityConfig{
+					Command:     gpb.AffinityConfig_BIND,
+					AffinityKey: "session.name",
+				},
+			},
+			{
+				Name: []string{"/google.spanner.v1.Spanner/DeleteSession"},
+				Affinity: &gpb.AffinityConfig{
+					Command:     gpb.AffinityConfig_UNBIND,
+					AffinityKey: "name",
+				},
+			},
+			{
+				Name: []string{"/google.spanner.v1.Spanner/GetSession"},
+				Affinity: &gpb.AffinityConfig{
+					Command:     gpb.AffinityConfig_BOUND,
+					AffinityKey: "name",
+				},
+			},
+			{
+				Name: []string{
+					"/google.spanner.v1.Spanner/BeginTransaction",
+					"/google.spanner.v1.Spanner/Commit",
+					"/google.spanner.v1.Spanner/ExecuteBatchDml",
+					"/google.spanner.v1.Spanner/ExecuteSql",
+					"/google.spanner.v1.Spanner/ExecuteStreamingSql",
+					"/google.spanner.v1.Spanner/PartitionQuery",
+					"/google.spanner.v1.Spanner/PartitionRead",
+					"/google.spanner.v1.Spanner/Read",
+					"/google.spanner.v1.Spanner/Rollback",
+					"/google.spanner.v1.Spanner/StreamingRead",
+				},
+				Affinity: &gpb.AffinityConfig{
+					Command:     gpb.AffinityConfig_BOUND,
+					AffinityKey: "session",
+				},
+			},
+		},
+	}
 )
+
+// ConnPool wrapper for gRPC-GCP channel pool. gtransport.ConnPool is the
+// interface Spanner client accepts as a replacement channel pool.
+type grpcGcpConnPool struct {
+	gtransport.ConnPool
+
+	cc   *grpc.ClientConn
+	size int
+}
+
+func (cp *grpcGcpConnPool) Conn() *grpc.ClientConn {
+	return cp.cc
+}
+
+// Spanner client uses this function to get channel pool size.
+func (cp *grpcGcpConnPool) Num() int {
+	return cp.size
+}
+
+func (cp *grpcGcpConnPool) Close() error {
+	return cp.cc.Close()
+}
 
 // Options holds the settings required for creating a prober.
 type ProberOptions struct {
@@ -115,6 +219,9 @@ type ProberOptions struct {
 
 	// Processing units for the Spanner instance. If specified, NodeCount must be 0.
 	ProcessingUnits int
+
+	// Use gRPC-GCP library.
+	UseGrpcGcp bool
 }
 
 // Prober holds the internal prober state.
@@ -237,12 +344,63 @@ func newSpannerProber(ctx context.Context, opt ProberOptions, clientOpts ...opti
 		return nil, err
 	}
 
-	clientOpts = append(
-		clientOpts,
-		option.WithGRPCDialOption(grpc.WithUnaryInterceptor(AddGFELatencyUnaryInterceptor)),
-		option.WithGRPCDialOption(grpc.WithStreamInterceptor(AddGFELatencyStreamingInterceptor)),
-		option.WithGRPCDialOption(grpc.WithStatsHandler(new(ocgrpc.ClientHandler))),
-	)
+	if !opt.UseGrpcGcp {
+		log.Info("Using default channel pool.")
+		clientOpts = append(
+			clientOpts,
+			option.WithGRPCDialOption(grpc.WithUnaryInterceptor(AddGFELatencyUnaryInterceptor)),
+			option.WithGRPCDialOption(grpc.WithStreamInterceptor(AddGFELatencyStreamingInterceptor)),
+			option.WithGRPCDialOption(grpc.WithStatsHandler(new(ocgrpc.ClientHandler))),
+		)
+	} else {
+		log.Info("Using gRPC-GCP channel pool.")
+		var perRPC credentials.PerRPCCredentials
+		var err error
+		keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+		if keyFile == "" {
+			perRPC, err = oauth.NewApplicationDefault(context.Background(), scope)
+		} else {
+			perRPC, err = oauth.NewServiceAccountFromFile(keyFile, scope)
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Converting gRPC-GCP config to JSON because grpc.Dial only accepts JSON
+		// config for configuring load balancers.
+		grpcGcpJsonConfig, err := protojson.Marshal(grpcGcpConfig)
+		if err != nil {
+			return nil, err
+		}
+		conn, err := grpc.Dial(
+			// Spanner endpoint. Replace this with your custom endpoint if not using
+			// the default endpoint.
+			opt.Endpoint,
+			// Application default or service account credentials set up above.
+			grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
+			grpc.WithPerRPCCredentials(perRPC),
+			// Do not look up load balancer (gRPC-GCP) config via DNS.
+			grpc.WithDisableServiceConfig(),
+			// Instead use this static config.
+			grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":%s}]}`, grpcgcp.Name, string(grpcGcpJsonConfig))),
+			// gRPC-GCP interceptors required for proper operation of gRPC-GCP
+			// channel pool. Add your interceptors as next arguments if needed.
+			grpc.WithChainUnaryInterceptor(grpcgcp.GCPUnaryClientInterceptor, AddGFELatencyUnaryInterceptor),
+			grpc.WithChainStreamInterceptor(grpcgcp.GCPStreamClientInterceptor, AddGFELatencyStreamingInterceptor),
+			grpc.WithStatsHandler(new(ocgrpc.ClientHandler)),
+		)
+		if err != nil {
+			return nil, err
+		}
+		pool := &grpcGcpConnPool{
+			cc: conn,
+			// Set the pool size on ConnPool to communicate it to Spanner client.
+			size: poolSize,
+		}
+		clientOpts = append(
+			clientOpts,
+			gtransport.WithConnPool(pool),
+		)
+	}
 	dataClient, err := spanner.NewClient(ctx, opt.databaseURI(), clientOpts...)
 	if err != nil {
 		return nil, err
