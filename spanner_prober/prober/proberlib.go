@@ -17,7 +17,6 @@ import (
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	log "github.com/golang/glog"
-	"go.opencensus.io/plugin/ocgrpc"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
@@ -350,7 +349,6 @@ func newSpannerProber(ctx context.Context, opt ProberOptions, clientOpts ...opti
 			clientOpts,
 			option.WithGRPCDialOption(grpc.WithUnaryInterceptor(AddGFELatencyUnaryInterceptor)),
 			option.WithGRPCDialOption(grpc.WithStreamInterceptor(AddGFELatencyStreamingInterceptor)),
-			option.WithGRPCDialOption(grpc.WithStatsHandler(new(ocgrpc.ClientHandler))),
 		)
 	} else {
 		log.Info("Using gRPC-GCP channel pool.")
