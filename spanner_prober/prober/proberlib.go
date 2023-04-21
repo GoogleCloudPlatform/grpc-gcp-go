@@ -85,14 +85,14 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{resultTag, opNameTag},
 	}
+)
 
-	poolSize = 2
-
-	grpcGcpConfig = &gpb.ApiConfig{
+func (o ProberOptions) grpcGcpConfig() *gpb.ApiConfig {
+	return &gpb.ApiConfig{
 		ChannelPool: &gpb.ChannelPoolConfig{
 			// Creates a fixed-size gRPC-GCP channel pool.
-			MinSize: uint32(poolSize),
-			MaxSize: uint32(poolSize),
+			MinSize: uint32(o.ChannelPoolSize),
+			MaxSize: uint32(o.ChannelPoolSize),
 			// This option repeats(preserves) the strategy used by the Spanner
 			// client to distribute BatchCreateSessions calls across channels.
 			BindPickStrategy: gpb.ChannelPoolConfig_ROUND_ROBIN,
@@ -159,7 +159,7 @@ var (
 			},
 		},
 	}
-)
+}
 
 // ConnPool wrapper for gRPC-GCP channel pool. gtransport.ConnPool is the
 // interface Spanner client accepts as a replacement channel pool.
@@ -221,6 +221,9 @@ type ProberOptions struct {
 
 	// Use gRPC-GCP library.
 	UseGrpcGcp bool
+
+	// Number of channels.
+	ChannelPoolSize int
 }
 
 // Prober holds the internal prober state.
@@ -325,6 +328,10 @@ func newSpannerProber(ctx context.Context, opt ProberOptions, clientOpts ...opti
 		return nil, errors.New("Prober must not be nil")
 	}
 
+	if opt.ChannelPoolSize < 1 {
+		return nil, errors.New("Number of channels must be >= 1")
+	}
+
 	instanceClient, err := instance.NewInstanceAdminClient(ctx, clientOpts...)
 	if err != nil {
 		return nil, err
@@ -365,7 +372,7 @@ func newSpannerProber(ctx context.Context, opt ProberOptions, clientOpts ...opti
 		}
 		// Converting gRPC-GCP config to JSON because grpc.Dial only accepts JSON
 		// config for configuring load balancers.
-		grpcGcpJsonConfig, err := protojson.Marshal(grpcGcpConfig)
+		grpcGcpJsonConfig, err := protojson.Marshal(opt.grpcGcpConfig())
 		if err != nil {
 			return nil, err
 		}
@@ -392,14 +399,21 @@ func newSpannerProber(ctx context.Context, opt ProberOptions, clientOpts ...opti
 		pool := &grpcGcpConnPool{
 			cc: conn,
 			// Set the pool size on ConnPool to communicate it to Spanner client.
-			size: poolSize,
+			size: opt.ChannelPoolSize,
 		}
 		clientOpts = append(
 			clientOpts,
 			gtransport.WithConnPool(pool),
 		)
 	}
-	dataClient, err := spanner.NewClient(ctx, opt.databaseURI(), clientOpts...)
+	dataClient, err := spanner.NewClientWithConfig(
+		ctx,
+		opt.databaseURI(),
+		spanner.ClientConfig{
+			NumChannels: opt.ChannelPoolSize,
+		},
+		clientOpts...,
+	)
 	if err != nil {
 		return nil, err
 	}

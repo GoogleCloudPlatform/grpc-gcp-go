@@ -40,6 +40,7 @@ var (
 	payloadSize     = flag.Int("payload_size", 1024, "Size of payload to write to the probe database.")
 	probeDeadline   = flag.Duration("probe_deadline", 10*time.Second, "Deadline for probe request.")
 	useGrpcGcp      = flag.Bool("grpc_gcp", false, "Use gRPC-GCP library.")
+	channelPoolSize = flag.Int("channels", 2, "Number of channels.")
 	endpoint        = flag.String("endpoint", "spanner.googleapis.com:443", "Cloud Spanner Endpoint to send request to.")
 )
 
@@ -60,9 +61,10 @@ func main() {
 		"ops_project: %q\ninstance: %q\ndatabase: %q\ninstance_config: %q\n"+
 		"node_count: %d\nprocessing_units: %d\nqps: %0.3f\nnum_rows: %d\n"+
 		"probe_type: %q\nmax_staleness: %v\npayload_size: %d\nprobe_deadline: %v\n"+
-		"grpc_gcp: %v\nendpoint: %q\n", *enableCloudOps, *project, *opsProject, *instance_name,
+		"grpc_gcp: %v\nchannels: %v\nendpoint: %q\n", *enableCloudOps, *project, *opsProject, *instance_name,
 		*database_name, *instanceConfig, *nodeCount, *processingUnits, *qps, *numRows,
-		*probeType, *maxStaleness, *payloadSize, *probeDeadline, *useGrpcGcp, *endpoint)
+		*probeType, *maxStaleness, *payloadSize, *probeDeadline, *useGrpcGcp, *channelPoolSize,
+		*endpoint)
 
 	grpclog.SetLoggerV2(grpclog.NewLoggerV2(ioutil.Discard, /* Discard logs at INFO level */
 		os.Stderr, os.Stderr))
@@ -128,6 +130,7 @@ func main() {
 		NodeCount:       *nodeCount,
 		ProcessingUnits: *processingUnits,
 		UseGrpcGcp:      *useGrpcGcp,
+		ChannelPoolSize: *channelPoolSize,
 	}
 
 	p, err := proberlib.NewProber(ctx, opts)
