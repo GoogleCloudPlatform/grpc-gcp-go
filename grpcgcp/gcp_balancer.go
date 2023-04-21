@@ -442,6 +442,7 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 		gb.scStates[sc] = gb.scStates[oldSc]
 		delete(gb.refreshingScRefs, sc)
 		delete(gb.scRefs, oldSc)
+		delete(gb.scStates, oldSc)
 		gb.scRefs[sc] = scRef
 		scRef.subConn = sc
 		scRef.deCalls = 0
@@ -456,7 +457,7 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 	oldS, ok := gb.scStates[sc]
 	if !ok {
 		grpclog.Infof(
-			"grpcgcp.gcpBalancer: got state changes for an unknown SubConn: %p, %v",
+			"grpcgcp.gcpBalancer: got state changes for an unknown/replaced SubConn: %p, %v",
 			sc,
 			s,
 		)

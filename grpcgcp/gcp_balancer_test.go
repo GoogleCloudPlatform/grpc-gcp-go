@@ -438,6 +438,178 @@ func TestRefreshesSubConnsWhenUnresponsive(t *testing.T) {
 	}
 }
 
+func TestRefreshingSubConnsDoesNotAffectConnState(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	connState := connectivity.Idle
+
+	// A slice to store all SubConns created by gcpBalancer's ClientConn.
+	newSCs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).Do(func(s balancer.State) {
+		connState = s.ConnectivityState
+	}).AnyTimes()
+	mockCC.EXPECT().RemoveSubConn(gomock.Any()).Times(2)
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().MinTimes(1)
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		newSCs = append(newSCs, newSC)
+		return newSC, nil
+	}).Times(4)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GcpBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          2,
+					MaxSize:                          2,
+					MaxConcurrentStreamsLowWatermark: 50,
+					UnresponsiveDetectionMs:          100,
+					UnresponsiveCalls:                3,
+				},
+			},
+		},
+	})
+
+	// Make subConn 0, 1 ready.
+	b.UpdateSubConnState(newSCs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(newSCs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	calls := make(map[balancer.SubConn][]func(balancer.DoneInfo), 0)
+
+	time.Sleep(time.Millisecond * 110)
+
+	addCall := func() {
+		ctx, _ := context.WithTimeout(context.TODO(), 0)
+		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+		if err != nil {
+			t.Fatalf("gcpPicker.Pick returns error %v, want: nil", err)
+		}
+		calls[pr.SubConn] = append(calls[pr.SubConn], pr.Done)
+	}
+
+	// Add 3 calls to subConn 0.
+	for len(calls[newSCs[0]]) < 3 {
+		addCall()
+	}
+
+	// Deadline exceeded on all calls for subConn 0.
+	for i := 0; i < len(calls[newSCs[0]]); i++ {
+		calls[newSCs[0]][i](balancer.DoneInfo{Err: deErr})
+	}
+	// ~110ms since last response and >= 3 deadline exceeded calls. Should trigger new subconn.
+	if got, want := len(newSCs), 3; got != want {
+		t.Fatalf("Unexpected number of subConns: %d, want %d", got, want)
+	}
+
+	// Make new subConn ready.
+	b.UpdateSubConnState(newSCs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	// Confirm shutdown of the old subConn.
+	b.UpdateSubConnState(newSCs[0], balancer.SubConnState{ConnectivityState: connectivity.Shutdown})
+
+	// Add 3 calls to subConn 1.
+	for len(calls[newSCs[1]]) < 3 {
+		addCall()
+	}
+
+	// Deadline exceeded on all calls for subConn 1.
+	for i := 0; i < len(calls[newSCs[1]]); i++ {
+		calls[newSCs[1]][i](balancer.DoneInfo{Err: deErr})
+	}
+	// ~110ms since last response and >= 3 deadline exceeded calls. Should trigger new subconn.
+	if got, want := len(newSCs), 4; got != want {
+		t.Fatalf("Unexpected number of subConns: %d, want %d", got, want)
+	}
+
+	// Make new subConn ready.
+	b.UpdateSubConnState(newSCs[3], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	// Confirm shutdown of the old subConn.
+	b.UpdateSubConnState(newSCs[1], balancer.SubConnState{ConnectivityState: connectivity.Shutdown})
+
+	if connState != connectivity.Ready {
+		t.Fatalf("gcpBalancer state changes to %v, want: %v", connState, connectivity.Ready)
+	}
+}
+
+func TestShutdownWhileRefreshing(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	// A slice to store all SubConns created by gcpBalancer's ClientConn.
+	newSCs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().RemoveSubConn(gomock.Any()).Times(1)
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().MinTimes(1)
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		newSCs = append(newSCs, newSC)
+		return newSC, nil
+	}).Times(3)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GcpBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          2,
+					MaxSize:                          2,
+					MaxConcurrentStreamsLowWatermark: 50,
+					UnresponsiveDetectionMs:          100,
+					UnresponsiveCalls:                3,
+				},
+			},
+		},
+	})
+
+	// Make subConn 0, 1 ready.
+	b.UpdateSubConnState(newSCs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(newSCs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	calls := make(map[balancer.SubConn][]func(balancer.DoneInfo), 0)
+
+	time.Sleep(time.Millisecond * 110)
+
+	addCall := func() {
+		ctx, _ := context.WithTimeout(context.TODO(), 0)
+		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
+		if err != nil {
+			t.Fatalf("gcpPicker.Pick returns error %v, want: nil", err)
+		}
+		calls[pr.SubConn] = append(calls[pr.SubConn], pr.Done)
+	}
+
+	// Add 3 calls to subConn 0.
+	for len(calls[newSCs[0]]) < 3 {
+		addCall()
+	}
+
+	// Deadline exceeded on all calls for subConn 0.
+	for i := 0; i < len(calls[newSCs[0]]); i++ {
+		calls[newSCs[0]][i](balancer.DoneInfo{Err: deErr})
+	}
+	// ~110ms since last response and >= 3 deadline exceeded calls. Should trigger new subconn.
+	if got, want := len(newSCs), 3; got != want {
+		t.Fatalf("Unexpected number of subConns: %d, want %d", got, want)
+	}
+
+	// Before the new subConn is ready we shutdown so all subConns shutdown.
+	b.UpdateSubConnState(newSCs[0], balancer.SubConnState{ConnectivityState: connectivity.Shutdown})
+	b.UpdateSubConnState(newSCs[1], balancer.SubConnState{ConnectivityState: connectivity.Shutdown})
+
+	// The new subConn becomes briefly ready before shutdown.
+	b.UpdateSubConnState(newSCs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	b.UpdateSubConnState(newSCs[2], balancer.SubConnState{ConnectivityState: connectivity.Shutdown})
+}
+
 func TestRoundRobinForBind(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
