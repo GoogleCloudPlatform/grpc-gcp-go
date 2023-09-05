@@ -11,6 +11,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
@@ -93,6 +94,9 @@ type server struct {
 }
 
 func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
+	m, _ := metadata.FromIncomingContext(ctx)
+	header := metadata.Pairs("authority-was", m[":authority"][0])
+	grpc.SendHeader(ctx, header)
 	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
 }
 
