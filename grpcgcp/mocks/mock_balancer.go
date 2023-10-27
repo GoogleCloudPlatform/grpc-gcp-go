@@ -147,6 +147,21 @@ func (mr *MockSubConnMockRecorder) Connect() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Connect", reflect.TypeOf((*MockSubConn)(nil).Connect))
 }
 
+// GetOrBuildProducer mocks base method.
+func (m *MockSubConn) GetOrBuildProducer(arg0 balancer.ProducerBuilder) (balancer.Producer, func()) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrBuildProducer", arg0)
+	ret0, _ := ret[0].(balancer.Producer)
+	ret1, _ := ret[1].(func())
+	return ret0, ret1
+}
+
+// GetOrBuildProducer indicates an expected call of GetOrBuildProducer.
+func (mr *MockSubConnMockRecorder) GetOrBuildProducer(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrBuildProducer", reflect.TypeOf((*MockSubConn)(nil).GetOrBuildProducer), arg0)
+}
+
 // UpdateAddresses mocks base method.
 func (m *MockSubConn) UpdateAddresses(arg0 []resolver.Address) {
 	m.ctrl.T.Helper()
