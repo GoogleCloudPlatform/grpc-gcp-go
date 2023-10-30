@@ -248,7 +248,7 @@ type testingClient struct {
 
 func TestGcpMultiEndpoint(t *testing.T) {
 
-	lEndpoint, fEndpoint := "localhost:50051", "[::1]:50051"
+	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
 	newE, newE2 := "127.0.0.1:50051", "127.0.0.2:50051"
 
 	defaultME, followerME := "default", "follower"
@@ -441,8 +441,8 @@ func TestGcpMultiEndpointWithDelays(t *testing.T) {
 	switchingDelay := time.Millisecond * 700
 	margin := time.Millisecond * 50
 
-	lEndpoint, fEndpoint := "localhost:50051", "[::1]:50051"
-	newE, newE2 := "127.0.0.2:50051", "127.0.0.3:50051"
+	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
+	newE, newE2 := "127.0.0.1:50051", "127.0.0.2:50051"
 
 	defaultME, followerME := "default", "follower"
 
