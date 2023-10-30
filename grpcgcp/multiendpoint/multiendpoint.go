@@ -56,10 +56,11 @@ var (
 //
 // The list of endpoints can be changed at any time with [MultiEndpoint.SetEndpoints] function.
 // MultiEndpoint will:
-//   - remove obsolete endpoints,
-//   - preserve remaining endpoints and their states
-//   - add new endpoints
-//   - update all endpoints priority according to the new order.
+//   - remove obsolete endpoints;
+//   - preserve remaining endpoints and their states;
+//   - add new endpoints;
+//   - update all endpoints priority according to the new order;
+//   - change current endpoint if necessary.
 //
 // After updating the list of endpoints, MultiEndpoint will switch the current endpoint to the
 // highest available endpoint in the list. If you have many processes using MultiEndpoint, this may
@@ -129,10 +130,17 @@ type multiEndpoint struct {
 	future          string
 }
 
+// Current returns current endpoint.
 func (me *multiEndpoint) Current() string {
 	return me.current
 }
 
+// SetEndpoints updates endpoints list:
+//   - remove obsolete endpoints;
+//   - preserve remaining endpoints and their states;
+//   - add new endpoints;
+//   - update all endpoints priority according to the new order;
+//   - change current endpoint if necessary.
 func (me *multiEndpoint) SetEndpoints(endpoints []string) error {
 	me.Lock()
 	defer me.Unlock()
@@ -234,6 +242,7 @@ func (me *multiEndpoint) switchFromTo(f, t *endpoint) {
 	})
 }
 
+// SetEndpointAvailable updates the state of an endpoint.
 func (me *multiEndpoint) SetEndpointAvailable(e string, avail bool) {
 	me.Lock()
 	defer me.Unlock()

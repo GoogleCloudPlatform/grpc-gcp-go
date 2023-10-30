@@ -56,6 +56,7 @@ func FromMEContext(ctx context.Context) (string, bool) {
 	return meName, ok
 }
 
+// GCPMultiEndpoint holds the state of MultiEndpoints-enabled gRPC client connection.
 type GCPMultiEndpoint struct {
 	sync.Mutex
 
@@ -99,12 +100,21 @@ func (gme *GCPMultiEndpoint) Close() error {
 	return errs.Combine()
 }
 
+// GCPMultiEndpointOptions holds options to construct a MultiEndpoints-enabled gRPC client
+// connection.
 type GCPMultiEndpointOptions struct {
-	GRPCgcpConfig  *pb.ApiConfig
+	// Regular gRPC-GCP configuration to be applied to every endpoint.
+	GRPCgcpConfig *pb.ApiConfig
+	// Map of MultiEndpoints where key is the MultiEndpoint name.
 	MultiEndpoints map[string]*multiendpoint.MultiEndpointOptions
-	Default        string
+	// Name of the default MultiEndpoint.
+	Default string
 }
 
+// NewGcpMultiEndpoint creates new GCPMultiEndpoint -- MultiEndpoints-enabled gRPC client
+// connection.
+// GCPMultiEndpoint implements `grpc.ClientConnInterface` and can be used
+// as a `grpc.ClientConn` when creating gRPC clients.
 func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOption) (*GCPMultiEndpoint, error) {
 	// Read config, create multiendpoints and pools.
 	o, err := makeOpts(meOpts, opts)
@@ -164,6 +174,7 @@ func (sm *monitoredConn) stopMonitoring() {
 	sm.cancel()
 }
 
+// UpdateMultiEndpoints reconfigures MultiEndpoints.
 func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOptions) error {
 	gme.Lock()
 	defer gme.Unlock()
