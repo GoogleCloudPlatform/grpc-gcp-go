@@ -16,7 +16,7 @@
  *
  */
 
-// Package multiendpoint implements multiendpoint feature.
+// Package multiendpoint implements multiendpoint feature. See [MultiEndpoint]
 package multiendpoint
 
 import (
@@ -172,6 +172,7 @@ func (me *multiEndpoint) SetEndpoints(endpoints []string) error {
 
 // Updates current to the top-priority available endpoint unless the current endpoint is
 // recovering.
+//
 // Must be run under me.Lock.
 func (me *multiEndpoint) maybeUpdateCurrent() {
 	c, exists := me.endpoints[me.current]
@@ -220,6 +221,7 @@ func (me *multiEndpoint) newEndpoint(id string, priority int) *endpoint {
 }
 
 // Changes or schedules a change of current to the endpoint t.
+//
 // Must be run under me.Lock.
 func (me *multiEndpoint) switchFromTo(f, t *endpoint) {
 	if me.current == t.id {
@@ -276,6 +278,7 @@ func (me *multiEndpoint) setEndpointAvailable(e string, avail bool) {
 }
 
 // Change the state of endpoint e to state s.
+//
 // Must be run under me.Lock.
 func setState(e *endpoint, s status) {
 	if e.futureChange != nil {

@@ -57,6 +57,64 @@ func FromMEContext(ctx context.Context) (string, bool) {
 }
 
 // GCPMultiEndpoint holds the state of MultiEndpoints-enabled gRPC client connection.
+//
+// The purposes of GcpMultiEndpoint are:
+//
+//   - Fallback to an alternative endpoint (host:port) of a gRPC service when the original
+//     endpoint is completely unavailable.
+//   - Be able to route an RPC call to a specific group of endpoints.
+//   - Be able to reconfigure endpoints in runtime.
+//
+// A group of endpoints is called a [multiendpoint.MultiEndpoint] and is essentially a list of endpoints
+// where priority is defined by the position in the list with the first endpoint having top
+// priority. A MultiEndpoint tracks endpoints' availability. When a MultiEndpoint is picked for an
+// RPC call, it picks the top priority endpoint that is currently available. More information on the
+// [multiendpoint.MultiEndpoint].
+//
+// GCPMultiEndpoint can have one or more MultiEndpoint identified by its name -- arbitrary
+// string provided in the [GCPMultiEndpointOptions] when configuring MultiEndpoints. This name
+// can be used to route an RPC call to this MultiEndpoint by using the [NewMEContext].
+//
+// GCPMultiEndpoint uses [GCPMultiEndpointOptions] for initial configuration.
+// An updated configuration can be provided at any time later using [UpdateMultiEndpoints].
+//
+// Example:
+//
+// Let's assume we have a service with read and write operations and the following backends:
+//
+//   - service.example.com -- the main set of backends supporting all operations
+//   - service-fallback.example.com -- read-write replica supporting all operations
+//   - ro-service.example.com -- read-only replica supporting only read operations
+//
+// Example configuration:
+//
+//   - MultiEndpoint named "default" with endpoints:
+//
+//     1. service.example.com:443
+//
+//     2. service-fallback.example.com:443
+//
+//   - MultiEndpoint named "read" with endpoints:
+//
+//     1. ro-service.example.com:443
+//
+//     2. service-fallback.example.com:443
+//
+//     3. service.example.com:443
+//
+// With the configuration above GCPMultiEndpoint will use the "default" MultiEndpoint by
+// default. It means that RPC calls by default will use the main endpoint and if it is not available
+// then the read-write replica.
+//
+// To offload some read calls to the read-only replica we can specify "read" MultiEndpoint in the
+// context. Then these calls will use the read-only replica endpoint and if it is not available
+// then the read-write replica and if it is also not available then the main endpoint.
+//
+// GCPMultiEndpoint creates a [grpcgcp] connection pool for every unique
+// endpoint. For the example above three connection pools will be created.
+//
+// [GCPMultiEndpoint] implements [grpc.ClientConnInterface] and can be used
+// as a [grpc.ClientConn] when creating gRPC clients.
 type GCPMultiEndpoint struct {
 	sync.Mutex
 
@@ -111,10 +169,11 @@ type GCPMultiEndpointOptions struct {
 	Default string
 }
 
-// NewGcpMultiEndpoint creates new GCPMultiEndpoint -- MultiEndpoints-enabled gRPC client
+// NewGcpMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
 // connection.
-// GCPMultiEndpoint implements `grpc.ClientConnInterface` and can be used
-// as a `grpc.ClientConn` when creating gRPC clients.
+//
+// [GCPMultiEndpoint] implements [grpc.ClientConnInterface] and can be used
+// as a [grpc.ClientConn] when creating gRPC clients.
 func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOption) (*GCPMultiEndpoint, error) {
 	// Read config, create multiendpoints and pools.
 	o, err := makeOpts(meOpts, opts)
@@ -175,6 +234,22 @@ func (sm *monitoredConn) stopMonitoring() {
 }
 
 // UpdateMultiEndpoints reconfigures MultiEndpoints.
+//
+// MultiEndpoints are matched with the current ones by name.
+//
+//   - If a current MultiEndpoint is missing in the updated list, the MultiEndpoint will be
+//     removed.
+//   - A new MultiEndpoint will be created for every new name in the list.
+//   - For an existing MultiEndpoint only its endpoints will be updated (no recovery timeout
+//     change).
+//
+// Endpoints are matched by the endpoint address (usually in the form of address:port).
+//
+//   - If an existing endpoint is not used by any MultiEndpoint in the updated list, then the
+//     connection poll for this endpoint will be shutdown.
+//   - A connection pool will be created for every new endpoint.
+//   - For an existing endpoint nothing will change (the connection pool will not be re-created,
+//     thus no connection credentials change, nor connection configuration change).
 func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOptions) error {
 	gme.Lock()
 	defer gme.Unlock()
