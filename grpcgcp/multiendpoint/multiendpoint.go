@@ -76,9 +76,9 @@ type MultiEndpoint interface {
 	// getting an outdated current endpoint.
 	Current() string
 
-	// SetEndpointAvailable informs MultiEndpoint when an endpoint becomes available or unavailable.
+	// SetEndpointAvailability informs MultiEndpoint when an endpoint becomes available or unavailable.
 	// This may change the current endpoint.
-	SetEndpointAvailable(e string, avail bool)
+	SetEndpointAvailability(e string, avail bool)
 
 	// SetEndpoints updates a list of endpoints:
 	//   - remove obsolete endpoints
@@ -244,16 +244,16 @@ func (me *multiEndpoint) switchFromTo(f, t *endpoint) {
 	})
 }
 
-// SetEndpointAvailable updates the state of an endpoint.
-func (me *multiEndpoint) SetEndpointAvailable(e string, avail bool) {
+// SetEndpointAvailability updates the state of an endpoint.
+func (me *multiEndpoint) SetEndpointAvailability(e string, avail bool) {
 	me.Lock()
 	defer me.Unlock()
-	me.setEndpointAvailable(e, avail)
+	me.setEndpointAvailability(e, avail)
 	me.maybeUpdateCurrent()
 }
 
 // Must be run under me.Lock.
-func (me *multiEndpoint) setEndpointAvailable(e string, avail bool) {
+func (me *multiEndpoint) setEndpointAvailability(e string, avail bool) {
 	ee, ok := me.endpoints[e]
 	if !ok {
 		return

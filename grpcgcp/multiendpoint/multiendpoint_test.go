@@ -202,7 +202,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// Second becomes available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	// Second is the current as the only available.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -210,7 +210,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// Third becomes available.
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	// Second is still the current because it has higher priority.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -218,7 +218,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// First becomes available.
-	me.SetEndpointAvailable(threeEndpoints[0], true)
+	me.SetEndpointAvailability(threeEndpoints[0], true)
 
 	// First becomes the current because it has higher priority.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -226,7 +226,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// Second becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[1], false)
+	me.SetEndpointAvailability(threeEndpoints[1], false)
 
 	// Second becoming unavailable should not affect the current first.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -234,7 +234,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// First becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[0], false)
+	me.SetEndpointAvailability(threeEndpoints[0], false)
 
 	// Third becomes the current as the only remaining available.
 	if c, want := me.Current(), threeEndpoints[2]; c != want {
@@ -242,7 +242,7 @@ func TestReturnsTopPriorityAvailableEndpointWithoutRecovery(t *testing.T) {
 	}
 
 	// Third becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[2], false)
+	me.SetEndpointAvailability(threeEndpoints[2], false)
 
 	// After all endpoints became unavailable the multiEndpoint sticks to the last used endpoint.
 	if c, want := me.Current(), threeEndpoints[2]; c != want {
@@ -260,7 +260,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Second becomes available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	// First is still the current to allow it to become available within recovery timeout.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -276,7 +276,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Third becomes available.
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	// Second is still the current because it has higher priority.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -284,7 +284,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Second becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[1], false)
+	me.SetEndpointAvailability(threeEndpoints[1], false)
 
 	// Second is still current, allowing upto recoveryTimeout to recover.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -293,7 +293,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 
 	// Halfway through recovery timeout the second recovers.
 	advanceTime(t, recoveryTO/2)
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	// Second is the current.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -307,7 +307,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Second becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[1], false)
+	me.SetEndpointAvailability(threeEndpoints[1], false)
 
 	// After recovery timeout has passed.
 	advanceTime(t, recoveryTO)
@@ -318,7 +318,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// First becomes available.
-	me.SetEndpointAvailable(threeEndpoints[0], true)
+	me.SetEndpointAvailability(threeEndpoints[0], true)
 
 	// First becomes current immediately.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -326,7 +326,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// First becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[0], false)
+	me.SetEndpointAvailability(threeEndpoints[0], false)
 
 	// First is still current, allowing upto recoveryTimeout to recover.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -342,7 +342,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Third becomes unavailable
-	me.SetEndpointAvailable(threeEndpoints[2], false)
+	me.SetEndpointAvailability(threeEndpoints[2], false)
 
 	// Third is still current, allowing upto recoveryTimeout to recover.
 	if c, want := me.Current(), threeEndpoints[2]; c != want {
@@ -351,7 +351,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 
 	// Halfway through recovery timeout the second becomes available.
 	advanceTime(t, recoveryTO/2)
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	// Second becomes current immediately.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -359,7 +359,7 @@ func TestCurrentReturnsTopPriorityAvailableEndpointWithRecovery(t *testing.T) {
 	}
 
 	// Second becomes unavailable.
-	me.SetEndpointAvailable(threeEndpoints[1], false)
+	me.SetEndpointAvailability(threeEndpoints[1], false)
 
 	// Second is still current, allowing upto recoveryTimeout to recover.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -407,7 +407,7 @@ func TestSetEndpointsUpdatesEndpointsPreservingStates(t *testing.T) {
 	me := initPlain(t, threeEndpoints)
 
 	// Second is available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 	me.SetEndpoints(fourEndpoints)
 
 	// "second" which is now under index 3 still must remain available.
@@ -420,8 +420,8 @@ func TestSetEndpointsUpdatesEndpointsSwitchToTopPriorityAvailable(t *testing.T) 
 	me := initPlain(t, threeEndpoints)
 
 	// Second and third is available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	me.SetEndpoints(fourEndpoints)
 
@@ -438,8 +438,8 @@ func TestSetEndpointsUpdatesEndpointsSwitchToTopPriorityAvailableWithRecovery(t 
 	advanceTime(t, recoveryTO)
 
 	// Second and third is available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	me.SetEndpoints(fourEndpoints)
 
@@ -454,7 +454,7 @@ func TestSetEndpointsUpdatesEndpointsRemovesOnlyActiveEndpoint(t *testing.T) {
 	me := initPlain(t, extraEndpoints)
 
 	// Extra is available.
-	me.SetEndpointAvailable("extra", true)
+	me.SetEndpointAvailability("extra", true)
 
 	// Extra is current
 	if c, want := me.Current(), extraEndpoints[3]; c != want {
@@ -478,7 +478,7 @@ func TestSetEndpointsUpdatesEndpointsRemovesOnlyActiveEndpointWithRecovery(t *te
 	advanceTime(t, recoveryTO)
 
 	// Extra is available.
-	me.SetEndpointAvailable("extra", true)
+	me.SetEndpointAvailability("extra", true)
 
 	// Extra is removed.
 	me.SetEndpoints(fourEndpoints)
@@ -497,10 +497,10 @@ func TestSetEndpointsRecoveringEndpointGetsRemoved(t *testing.T) {
 	advanceTime(t, recoveryTO)
 
 	// Extra is available.
-	me.SetEndpointAvailable("extra", true)
+	me.SetEndpointAvailability("extra", true)
 
 	// Extra is recovering.
-	me.SetEndpointAvailable("extra", false)
+	me.SetEndpointAvailability("extra", false)
 
 	// Extra is removed.
 	me.SetEndpoints(fourEndpoints)
@@ -525,7 +525,7 @@ func TestSetEndpointAvailableSubsequentUnavailableShouldNotExtendRecoveryTimeout
 
 	// Before recovery timeout repeat unavailable signal.
 	advanceTime(t, recoveryTO/2)
-	me.SetEndpointAvailable(threeEndpoints[0], false)
+	me.SetEndpointAvailability(threeEndpoints[0], false)
 
 	// After the initial timeout it must become unavailable.
 	advanceTime(t, recoveryTO/2)
@@ -539,14 +539,14 @@ func TestSetEndpointAvailableRecoveringUnavailableRace(t *testing.T) {
 	me := initWithDelays(t, threeEndpoints, recoveryTO, 0)
 
 	// Set "second" available to have something to fallback to.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	for i := 0; i < 100; i++ {
 		// Right at the recovery timeout we enable the "first". This should race with the "first"
 		// becoming unavailable from its recovery timer. If this race condition is not covered then
 		// the test will most likely fail or at least be flaky.
 		advanceTimeConcurring(t, recoveryTO, []func(){
-			func() { me.SetEndpointAvailable(threeEndpoints[0], true) },
+			func() { me.SetEndpointAvailability(threeEndpoints[0], true) },
 		})
 
 		// It is expected that the scheduled Recovering->Unavailable state change (from the recovery
@@ -567,15 +567,15 @@ func TestSetEndpointAvailableRecoveringUnavailableRace(t *testing.T) {
 		}
 
 		// Send it back to recovery state and start recovery timer.
-		me.SetEndpointAvailable(threeEndpoints[0], false)
+		me.SetEndpointAvailability(threeEndpoints[0], false)
 	}
 }
 
 func TestSetEndpointAvailableDoNotSwitchToUnavailableFromAvailable(t *testing.T) {
 	me := initWithDelays(t, threeEndpoints, recoveryTO, switchDelay)
 	// Second and third endpoint are available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	advanceTime(t, recoveryTO)
 	// Second is current after recovery timeout.
@@ -584,7 +584,7 @@ func TestSetEndpointAvailableDoNotSwitchToUnavailableFromAvailable(t *testing.T)
 	}
 
 	// First becomes available.
-	me.SetEndpointAvailable(threeEndpoints[0], true)
+	me.SetEndpointAvailability(threeEndpoints[0], true)
 
 	// Switching is planned to "first" after switching delay. "second" is still current.
 	if c, want := me.Current(), threeEndpoints[1]; c != want {
@@ -593,7 +593,7 @@ func TestSetEndpointAvailableDoNotSwitchToUnavailableFromAvailable(t *testing.T)
 
 	// Almost at switching delay the "first" endpoint becomes unavailable again.
 	advanceTime(t, switchDelay-(switchDelay/10))
-	me.SetEndpointAvailable(threeEndpoints[0], false)
+	me.SetEndpointAvailability(threeEndpoints[0], false)
 
 	// After switching delay the current must be "second". No switching to the recovering
 	// "first" should occur.
@@ -610,7 +610,7 @@ func TestSetEndpointAvailableDoNotSwitchPreemptively(t *testing.T) {
 	advanceTime(t, recoveryTO)
 
 	// Only second endpoint is available.
-	me.SetEndpointAvailable(threeEndpoints[1], true)
+	me.SetEndpointAvailability(threeEndpoints[1], true)
 
 	// After switching delay the second should be current.
 	advanceTime(t, switchDelay)
@@ -620,11 +620,11 @@ func TestSetEndpointAvailableDoNotSwitchPreemptively(t *testing.T) {
 
 	// Third becomes available. This shouldn't schedule the switch as second is still
 	// the most preferable.
-	me.SetEndpointAvailable(threeEndpoints[2], true)
+	me.SetEndpointAvailability(threeEndpoints[2], true)
 
 	advanceTime(t, switchDelay/2)
 	// Halfway to switch delay the first endpoint becomes available.
-	me.SetEndpointAvailable(threeEndpoints[0], true)
+	me.SetEndpointAvailability(threeEndpoints[0], true)
 
 	advanceTime(t, switchDelay/2)
 	// After complete switching delay since third become available, the second should still be
@@ -644,7 +644,7 @@ func TestSetEndpointsSwitchingDelayed(t *testing.T) {
 	me := initWithDelays(t, threeEndpoints, recoveryTO, switchDelay)
 	// All endpoints are available.
 	for _, e := range threeEndpoints {
-		me.SetEndpointAvailable(e, true)
+		me.SetEndpointAvailability(e, true)
 	}
 
 	// First is current.
@@ -657,7 +657,7 @@ func TestSetEndpointsSwitchingDelayed(t *testing.T) {
 	extraEndpoints = append(extraEndpoints, threeEndpoints...)
 
 	me.SetEndpoints(extraEndpoints)
-	me.SetEndpointAvailable(extraEndpoints[0], true)
+	me.SetEndpointAvailability(extraEndpoints[0], true)
 
 	// The current endpoint should not change instantly.
 	if c, want := me.Current(), threeEndpoints[0]; c != want {
@@ -671,7 +671,7 @@ func TestSetEndpointsSwitchingDelayed(t *testing.T) {
 	}
 
 	// Make current endpoint unavailable.
-	me.SetEndpointAvailable(extraEndpoints[0], false)
+	me.SetEndpointAvailability(extraEndpoints[0], false)
 
 	// Should wait for recovery timeout.
 	if c, want := me.Current(), extraEndpoints[0]; c != want {
@@ -697,7 +697,7 @@ func TestSetEndpointsSwitchingDelayed(t *testing.T) {
 	// 4 third AVAILABLE
 
 	// Make "extra" endpoint available.
-	me.SetEndpointAvailable("extra", true)
+	me.SetEndpointAvailability("extra", true)
 
 	// Should wait for the switching delay.
 	// Halfway it should be still "first" endpoint.
@@ -707,7 +707,7 @@ func TestSetEndpointsSwitchingDelayed(t *testing.T) {
 	}
 
 	// Now another higher priority endpoint becomes available.
-	me.SetEndpointAvailable("extra2", true)
+	me.SetEndpointAvailability("extra2", true)
 
 	// Still "first" endpoint is current because switching delay has not passed.
 	if c, want := me.Current(), updatedEndpoints[2]; c != want {

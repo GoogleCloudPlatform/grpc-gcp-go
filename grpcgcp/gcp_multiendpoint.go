@@ -45,15 +45,15 @@ type contextMEKey int
 
 var meKey contextMEKey
 
-// NewMEContext returns a new Context that carries Multiendpoint name meName.
-func NewMEContext(ctx context.Context, meName string) context.Context {
-	return context.WithValue(ctx, meKey, meName)
+// NewMEContext returns a new Context that carries Multiendpoint name.
+func NewMEContext(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, meKey, name)
 }
 
 // FromMEContext returns the MultiEndpoint name stored in ctx, if any.
 func FromMEContext(ctx context.Context) (string, bool) {
-	meName, ok := ctx.Value(meKey).(string)
-	return meName, ok
+	name, ok := ctx.Value(meKey).(string)
+	return name, ok
 }
 
 // GCPMultiEndpoint holds the state of MultiEndpoints-enabled gRPC client connection.
@@ -224,7 +224,7 @@ func (sm *monitoredConn) monitor() {
 		currentState = sm.conn.GetState()
 		// Inform all multiendpoints.
 		for _, me := range sm.gme.mes {
-			me.SetEndpointAvailable(sm.endpoint, currentState == connectivity.Ready)
+			me.SetEndpointAvailability(sm.endpoint, currentState == connectivity.Ready)
 		}
 	}
 }
@@ -320,7 +320,7 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 	for e, mc := range gme.pools {
 		s := mc.conn.GetState()
 		for _, me := range gme.mes {
-			me.SetEndpointAvailable(e, s == connectivity.Ready)
+			me.SetEndpointAvailability(e, s == connectivity.Ready)
 		}
 	}
 	return nil
