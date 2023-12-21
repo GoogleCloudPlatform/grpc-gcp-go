@@ -32,13 +32,6 @@ import (
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
 
-var (
-	// To be redefined in tests.
-	grpcDial = func(target string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-		return grpc.Dial(target, opts...)
-	}
-)
-
 var log = grpclog.Component("GCPMultiEndpoint")
 
 type contextMEKey int
@@ -123,12 +116,11 @@ type GCPMultiEndpoint struct {
 	pools       map[string]*monitoredConn
 	opts        []grpc.DialOption
 	gcpConfig   *pb.ApiConfig
-
-	grpc.ClientConnInterface
+	dialFunc    func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
 // Make sure GcpMultiEndpoint implements grpc.ClientConnInterface.
-var _ grpc.ClientConnInterface = &GCPMultiEndpoint{}
+var _ grpc.ClientConnInterface = (*GCPMultiEndpoint)(nil)
 
 func (gme *GCPMultiEndpoint) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	return gme.pickConn(ctx).Invoke(ctx, method, args, reply, opts...)
@@ -168,6 +160,8 @@ type GCPMultiEndpointOptions struct {
 	MultiEndpoints map[string]*multiendpoint.MultiEndpointOptions
 	// Name of the default MultiEndpoint.
 	Default string
+	// Func to dial grpc ClientConn.
+	DialFunc func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
 // NewGcpMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
@@ -187,6 +181,12 @@ func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOptio
 		defaultName: meOpts.Default,
 		opts:        o,
 		gcpConfig:   meOpts.GRPCgcpConfig,
+		dialFunc:    meOpts.DialFunc,
+	}
+	if gme.dialFunc == nil {
+		gme.dialFunc = func(_ context.Context, target string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+			return grpc.Dial(target, opts...)
+		}
 	}
 	if err := gme.UpdateMultiEndpoints(meOpts); err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 	for e := range validPools {
 		if _, ok := gme.pools[e]; !ok {
 			// This creates a ClientConn with the gRPC-GCP balancer managing connection pool.
-			conn, err := grpcDial(e, gme.opts...)
+			conn, err := gme.dialFunc(context.Background(), e, gme.opts...)
 			if err != nil {
 				return err
 			}
