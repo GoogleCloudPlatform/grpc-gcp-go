@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
@@ -149,6 +150,10 @@ func (gme *GCPMultiEndpoint) Close() error {
 		}
 	}
 	return errs.Combine()
+}
+
+func (gme *GCPMultiEndpoint) GCPConfig() *pb.ApiConfig {
+	return proto.Clone(gme.gcpConfig).(*pb.ApiConfig)
 }
 
 // GCPMultiEndpointOptions holds options to construct a MultiEndpoints-enabled gRPC client
