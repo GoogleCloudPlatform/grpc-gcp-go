@@ -149,10 +149,11 @@ func (gme *GCPMultiEndpoint) pickConn(ctx context.Context) *grpc.ClientConn {
 
 func (gme *GCPMultiEndpoint) Close() error {
 	var errs multiError
-	for _, mc := range gme.pools {
+	for e, mc := range gme.pools {
 		mc.stopMonitoring()
 		if err := mc.conn.Close(); err != nil {
 			errs = append(errs, err)
+			log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
 		}
 	}
 	return errs.Combine()
@@ -216,9 +217,19 @@ type monitoredConn struct {
 	cancel   context.CancelFunc
 }
 
-func (sm *monitoredConn) monitor() {
-	var ctx context.Context
-	ctx, sm.cancel = context.WithCancel(context.Background())
+func newMonitoredConn(endpoint string, conn *grpc.ClientConn, gme *GCPMultiEndpoint) (mc *monitoredConn) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mc = &monitoredConn{
+		endpoint: endpoint,
+		conn:     conn,
+		gme:      gme,
+		cancel:   cancel,
+	}
+	go mc.monitor(ctx)
+	return
+}
+
+func (sm *monitoredConn) monitor(ctx context.Context) {
 	currentState := sm.conn.GetState()
 	for sm.conn.WaitForStateChange(ctx, currentState) {
 		currentState = sm.conn.GetState()
@@ -272,12 +283,7 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 			if err != nil {
 				return err
 			}
-			gme.pools[e] = &monitoredConn{
-				endpoint: e,
-				conn:     conn,
-				gme:      gme,
-			}
-			go gme.pools[e].monitor()
+			gme.pools[e] = newMonitoredConn(e, conn, gme)
 		}
 	}
 
@@ -309,7 +315,7 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 	for e, mc := range gme.pools {
 		if _, ok := validPools[e]; !ok {
 			if err := mc.conn.Close(); err != nil {
-				// TODO: log error.
+				log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
 			}
 			mc.stopMonitoring()
 			delete(gme.pools, e)

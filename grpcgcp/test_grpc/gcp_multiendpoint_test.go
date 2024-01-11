@@ -664,3 +664,40 @@ func TestGcpMultiEndpointWithDelays(t *testing.T) {
 	// Give some time to connect and switching delay. Follower must be used.
 	tc.SayHelloWorksWithin(context.Background(), fEndpoint, waitTO+switchingDelay)
 }
+
+func TestGcpMultiEndpointInstantShutdown(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Panic: %v", r)
+		}
+	}()
+
+	defaultME := "default"
+
+	apiCfg := &configpb.ApiConfig{
+		ChannelPool: &configpb.ChannelPoolConfig{
+			MinSize: 3,
+			MaxSize: 3,
+		},
+	}
+
+	conn, err := grpcgcp.NewGcpMultiEndpoint(
+		&grpcgcp.GCPMultiEndpointOptions{
+			GRPCgcpConfig: apiCfg,
+			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
+				defaultME: {
+					Endpoints: []string{"localhost:50051"},
+				},
+			},
+			Default: defaultME,
+		},
+		grpc.WithInsecure(),
+	)
+
+	if err != nil {
+		t.Fatalf("NewMultiEndpointConn returns unexpected error: %v", err)
+	}
+
+	// Closing GcpMultiEndpoint immediately should not cause panic.
+	conn.Close()
+}
