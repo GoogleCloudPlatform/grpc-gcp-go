@@ -29,11 +29,14 @@ import (
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/status"
 )
 
 // Deadline exceeded gRPC error caused by client-side context reached deadline.
 var deErr = status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+
+var plog = grpclog.Component("grpcgcp.gcpPicker")
 
 func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
 	return &gcpPicker{
@@ -50,6 +53,7 @@ type gcpPicker struct {
 
 func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if len(p.scRefs) <= 0 {
+		plog.Info("returning balancer.ErrNoSubConnAvailable as no sub-conns are available.")
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
@@ -77,6 +81,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		return balancer.PickResult{}, err
 	}
 	if scRef == nil {
+		plog.Info("returning balancer.ErrNoSubConnAvailable as no sub-conn was picked.")
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
@@ -101,6 +106,8 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 			p.gb.unbindSubConn(boundKey)
 		}
 	}
+
+	plog.Infof("picked subconn: %v.", scRef.subConn)
 	return balancer.PickResult{SubConn: scRef.subConn, Done: callback}, nil
 }
 
@@ -143,6 +150,7 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.Affi
 	var err error
 	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
 		scRef = p.gb.getSubConnRoundRobin()
+		plog.Infof("picking subconn for round-robin bind: %v.", scRef.subConn)
 	} else {
 		scRef, err = p.getSubConnRef(boundKey)
 	}
