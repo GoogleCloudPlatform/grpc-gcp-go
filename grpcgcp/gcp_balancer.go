@@ -72,7 +72,6 @@ func (bb *gcpBalancerBuilder) Build(
 		affinityMap:      make(map[string]balancer.SubConn),
 		fallbackMap:      make(map[string]balancer.SubConn),
 		scRefs:           make(map[balancer.SubConn]*subConnRef),
-		scRefSignal:      make(map[*subConnRef]chan struct{}),
 		scStates:         make(map[balancer.SubConn]connectivity.State),
 		refreshingScRefs: make(map[balancer.SubConn]*subConnRef),
 		scRefList:        []*subConnRef{},
@@ -153,12 +152,13 @@ func (cse *connectivityStateEvaluator) recordTransition(
 // connectivity state, affinity count and streams count.
 type subConnRef struct {
 	subConn     balancer.SubConn
-	affinityCnt int32     // Keeps track of the number of keys bound to the subConn.
-	streamsCnt  int32     // Keeps track of the number of streams opened on the subConn.
-	lastResp    time.Time // Timestamp of the last response from the server.
-	deCalls     uint32    // Keeps track of deadline exceeded calls since last response.
-	refreshing  bool      // If this subconn is in the process of refreshing.
-	refreshCnt  uint32    // Number of refreshes since last response.
+	stateSignal chan struct{} // This channel is closed and re-created when subconn or its state changes.
+	affinityCnt int32         // Keeps track of the number of keys bound to the subConn.
+	streamsCnt  int32         // Keeps track of the number of streams opened on the subConn.
+	lastResp    time.Time     // Timestamp of the last response from the server.
+	deCalls     uint32        // Keeps track of deadline exceeded calls since last response.
+	refreshing  bool          // If this subconn is in the process of refreshing.
+	refreshCnt  uint32        // Number of refreshes since last response.
 }
 
 func (ref *subConnRef) getAffinityCnt() int32 {
@@ -211,7 +211,6 @@ type gcpBalancer struct {
 	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
-	scRefSignal map[*subConnRef]chan struct{}
 	scRefList   []*subConnRef
 	rrRefId     uint32
 
@@ -341,10 +340,10 @@ func (gb *gcpBalancer) addSubConn() {
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
-		subConn:  sc,
-		lastResp: time.Now(),
+		subConn:     sc,
+		stateSignal: make(chan struct{}),
+		lastResp:    time.Now(),
 	}
-	gb.scRefSignal[gb.scRefs[sc]] = make(chan struct{})
 	gb.scStates[sc] = connectivity.Idle
 	gb.scRefList = append(gb.scRefList, gb.scRefs[sc])
 	sc.Connect()
@@ -391,7 +390,7 @@ func (gb *gcpBalancer) getSubConnRoundRobin() *subConnRef {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		select {
 		case <-ctx.Done():
-		case <-gb.scRefSignal[scRef]:
+		case <-scRef.stateSignal:
 		}
 		cancel()
 	}
@@ -524,8 +523,8 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 
 	if gb.scRefs[sc] != nil {
 		// Inform of the state change.
-		close(gb.scRefSignal[gb.scRefs[sc]])
-		gb.scRefSignal[gb.scRefs[sc]] = make(chan struct{})
+		close(gb.scRefs[sc].stateSignal)
+		gb.scRefs[sc].stateSignal = make(chan struct{})
 	}
 }
 
