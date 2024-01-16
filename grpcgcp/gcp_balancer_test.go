@@ -667,9 +667,13 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
+	var start time.Time
+	delay := time.Millisecond * 345
+	margin := time.Millisecond * 50
 	// Bring other subconns to ready with some delay.
 	go func() {
-		time.Sleep(time.Millisecond * 100)
+		start = time.Now()
+		time.Sleep(delay)
 		b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 		b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 	}()
@@ -678,6 +682,15 @@ func TestRoundRobinForBind(t *testing.T) {
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
 	if want := scs[0]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Also, when round-robin for bind operations is enabled, the picker must wait until subconn became ready.
+	elapsed := time.Now().Sub(start)
+	if elapsed < delay {
+		t.Fatalf("gcpPicker.Pick returns before subconn became active")
+	}
+	if elapsed > delay+margin {
+		t.Fatalf("gcpPicker.Pick waited too long after subcon became active. want <=%v, got %v", margin, delay+margin-elapsed)
 	}
 
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})

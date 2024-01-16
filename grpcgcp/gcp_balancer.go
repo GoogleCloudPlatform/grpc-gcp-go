@@ -521,10 +521,10 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 		})
 	}
 
-	if gb.scRefs[sc] != nil {
+	if scRef := gb.scRefs[sc]; scRef != nil {
 		// Inform of the state change.
-		close(gb.scRefs[sc].stateSignal)
-		gb.scRefs[sc].stateSignal = make(chan struct{})
+		close(scRef.stateSignal)
+		scRef.stateSignal = make(chan struct{})
 	}
 }
 
