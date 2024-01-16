@@ -667,6 +667,13 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
+	// Bring other subconns to ready with some delay.
+	go func() {
+		time.Sleep(time.Millisecond * 100)
+		b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+		b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}()
+
 	// Expect 0 subconn because the picker should pick even non-ready subcons for binding calls in a round-robin manner.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
 	if want := scs[0]; pr.SubConn != want || err != nil {
@@ -694,10 +701,6 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
-	// Bring other subconns to ready.
-	b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
-	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
-
 	// Create more regular calls to reach the limit (watermark*subconns - 6 calls initiated above) to spawn new subconn.
 	for i := 0; i < streamsWatermark*minSize-6; i++ {
 		_, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.TODO()})
@@ -721,6 +724,8 @@ func TestRoundRobinForBind(t *testing.T) {
 	if want := scs[2]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
+
+	b.UpdateSubConnState(scs[3], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 
 	// Extends to newly created subconn.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})

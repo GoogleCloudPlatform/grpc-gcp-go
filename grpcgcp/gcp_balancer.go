@@ -19,6 +19,7 @@
 package grpcgcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -71,6 +72,7 @@ func (bb *gcpBalancerBuilder) Build(
 		affinityMap:      make(map[string]balancer.SubConn),
 		fallbackMap:      make(map[string]balancer.SubConn),
 		scRefs:           make(map[balancer.SubConn]*subConnRef),
+		scRefSignal:      make(map[*subConnRef]chan struct{}),
 		scStates:         make(map[balancer.SubConn]connectivity.State),
 		refreshingScRefs: make(map[balancer.SubConn]*subConnRef),
 		scRefList:        []*subConnRef{},
@@ -209,6 +211,7 @@ type gcpBalancer struct {
 	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
+	scRefSignal map[*subConnRef]chan struct{}
 	scRefList   []*subConnRef
 	rrRefId     uint32
 
@@ -341,6 +344,7 @@ func (gb *gcpBalancer) addSubConn() {
 		subConn:  sc,
 		lastResp: time.Now(),
 	}
+	gb.scRefSignal[gb.scRefs[sc]] = make(chan struct{})
 	gb.scStates[sc] = connectivity.Idle
 	gb.scRefList = append(gb.scRefList, gb.scRefs[sc])
 	sc.Connect()
@@ -379,7 +383,20 @@ func (gb *gcpBalancer) getSubConnRoundRobin() *subConnRef {
 	if len(gb.scRefList) == 0 {
 		gb.newSubConn()
 	}
-	return gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
+	scRef := gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
+
+	// Wait until subconn is ready.
+	for gb.scStates[scRef.subConn] != connectivity.Ready {
+		grpclog.Infof("grpcgcp.gcpBalancer: scRef is not ready: %v", gb.scStates[scRef.subConn])
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		select {
+		case <-ctx.Done():
+		case <-gb.scRefSignal[scRef]:
+		}
+		cancel()
+	}
+
+	return scRef
 }
 
 // bindSubConn binds the given affinity key to an existing subConnRef.
@@ -503,6 +520,12 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 			ConnectivityState: gb.state,
 			Picker:            gb.picker,
 		})
+	}
+
+	if gb.scRefs[sc] != nil {
+		// Inform of the state change.
+		close(gb.scRefSignal[gb.scRefs[sc]])
+		gb.scRefSignal[gb.scRefs[sc]] = make(chan struct{})
 	}
 }
 

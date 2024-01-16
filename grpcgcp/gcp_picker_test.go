@@ -318,9 +318,10 @@ func TestPickNewSubConn(t *testing.T) {
 	mp := make(map[balancer.SubConn]*subConnRef)
 	mp[mockSC] = scRefs[0]
 	b := &gcpBalancer{
-		cc:       mockCC,
-		scRefs:   mp,
-		scStates: make(map[balancer.SubConn]connectivity.State),
+		cc:          mockCC,
+		scRefs:      mp,
+		scRefSignal: make(map[*subConnRef]chan struct{}),
+		scStates:    make(map[balancer.SubConn]connectivity.State),
 		cfg: &GcpBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
@@ -393,6 +394,9 @@ func TestBindSubConn(t *testing.T) {
 	// Simulate a pool with two connections.
 	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
 	b.scRefs = mp
+	b.scRefSignal = make(map[*subConnRef]chan struct{})
+	b.scRefSignal[mp[scBusy]] = make(chan struct{})
+	b.scRefSignal[mp[scIdle]] = make(chan struct{})
 	b.scStates[scBusy] = connectivity.Idle
 	b.scStates[scIdle] = connectivity.Idle
 	// Simulate resolver.
@@ -480,6 +484,9 @@ func TestPickMappedSubConn(t *testing.T) {
 	// Simulate a pool with two connections.
 	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
 	b.scRefs = mp
+	b.scRefSignal = make(map[*subConnRef]chan struct{})
+	b.scRefSignal[mp[mockSCnotmapped]] = make(chan struct{})
+	b.scRefSignal[mp[mockSCmapped]] = make(chan struct{})
 	b.scStates[mockSCnotmapped] = connectivity.Idle
 	b.scStates[mockSCmapped] = connectivity.Idle
 	// Simulate resolver.
