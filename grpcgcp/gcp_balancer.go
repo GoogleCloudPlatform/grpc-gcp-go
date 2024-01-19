@@ -36,7 +36,7 @@ import (
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 )
 
-var _ balancer.Balancer = &gcpBalancer{} // Ensure gcpBalancer implements Balancer
+var _ balancer.Balancer = (*gcpBalancer)(nil) // Ensure gcpBalancer implements Balancer
 
 const (
 	// Name is the name of grpc_gcp balancer.
@@ -65,7 +65,7 @@ func (bb *gcpBalancerBuilder) Build(
 	cc balancer.ClientConn,
 	opt balancer.BuildOptions,
 ) balancer.Balancer {
-	return &gcpBalancer{
+	gb := &gcpBalancer{
 		cc:               cc,
 		methodCfg:        make(map[string]*pb.AffinityConfig),
 		affinityMap:      make(map[string]balancer.SubConn),
@@ -81,6 +81,8 @@ func (bb *gcpBalancerBuilder) Build(
 		// may call UpdateBalancerState with this picker.
 		picker: newErrPicker(balancer.ErrNoSubConnAvailable),
 	}
+	gb.log = NewGCPLogger(compLogger, fmt.Sprintf("[gcpBalancer %p]", gb))
+	return gb
 }
 
 func (*gcpBalancerBuilder) Name() string {
@@ -194,8 +196,6 @@ func (ref *subConnRef) gotResp() {
 }
 
 type gcpBalancer struct {
-	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
-
 	cfg       *GcpBalancerConfig
 	methodCfg map[string]*pb.AffinityConfig
 
@@ -218,6 +218,7 @@ type gcpBalancer struct {
 	unresponsiveDetection bool
 
 	picker balancer.Picker
+	log    grpclog.LoggerV2
 }
 
 func (gb *gcpBalancer) initializeConfig(cfg *GcpBalancerConfig) {
@@ -271,7 +272,9 @@ func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error
 	gb.mu.Lock()
 	defer gb.mu.Unlock()
 	addrs := ccs.ResolverState.Addresses
-	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs, " and balancer config: ", ccs.BalancerConfig)
+	if gb.log.V(FINE) {
+		gb.log.Infoln("got new resolved addresses: ", addrs, " and balancer config: ", ccs.BalancerConfig)
+	}
 	gb.addrs = addrs
 	if gb.cfg == nil {
 		cfg, ok := ccs.BalancerConfig.(*GcpBalancerConfig)
@@ -296,10 +299,7 @@ func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error
 }
 
 func (gb *gcpBalancer) ResolverError(err error) {
-	grpclog.Warningf(
-		"grpcgcp.gcpBalancer: ResolverError: %v",
-		err,
-	)
+	gb.log.Warningf("ResolverError: %v", err)
 }
 
 // check current connection pool size
@@ -334,7 +334,7 @@ func (gb *gcpBalancer) addSubConn() {
 		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},
 	)
 	if err != nil {
-		grpclog.Errorf("grpcgcp.gcpBalancer: failed to NewSubConn: %v", err)
+		gb.log.Errorf("failed to NewSubConn: %v", err)
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
@@ -430,7 +430,9 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 	s := scs.ConnectivityState
 
 	if scRef, found := gb.refreshingScRefs[sc]; found {
-		grpclog.Infof("grpcgcp.gcpBalancer: handle replacement SubConn state change: %p, %v", sc, s)
+		if gb.log.V(FINE) {
+			gb.log.Infof("handle replacement SubConn state change: %p, %v", sc, s)
+		}
 		if s != connectivity.Ready {
 			// Ignore the replacement sc until it's ready.
 			return
@@ -452,15 +454,19 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 		gb.cc.RemoveSubConn(oldSc)
 	}
 
-	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
+	if gb.log.V(FINE) {
+		gb.log.Infof("handle SubConn state change: %p, %v", sc, s)
+	}
 
 	oldS, ok := gb.scStates[sc]
 	if !ok {
-		grpclog.Infof(
-			"grpcgcp.gcpBalancer: got state changes for an unknown/replaced SubConn: %p, %v",
-			sc,
-			s,
-		)
+		if gb.log.V(FINE) {
+			gb.log.Infof(
+				"got state changes for an unknown/replaced SubConn: %p, %v",
+				sc,
+				s,
+			)
+		}
 		return
 	}
 	gb.scStates[sc] = s
@@ -523,7 +529,7 @@ func (gb *gcpBalancer) refresh(ref *subConnRef) {
 		balancer.NewSubConnOptions{HealthCheckEnabled: healthCheckEnabled},
 	)
 	if err != nil {
-		grpclog.Errorf("grpcgcp.gcpBalancer: failed to create a replacement SubConn with NewSubConn: %v", err)
+		gb.log.Errorf("failed to create a replacement SubConn with NewSubConn: %v", err)
 		return
 	}
 	gb.refreshingScRefs[sc] = ref
