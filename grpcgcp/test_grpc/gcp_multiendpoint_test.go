@@ -21,6 +21,7 @@ package test_grpc
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -700,4 +701,64 @@ func TestGcpMultiEndpointInstantShutdown(t *testing.T) {
 
 	// Closing GcpMultiEndpoint immediately should not cause panic.
 	conn.Close()
+}
+
+func TestGcpMultiEndpointDialFunc(t *testing.T) {
+
+	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
+
+	defaultME, followerME := "default", "follower"
+
+	apiCfg := &configpb.ApiConfig{
+		ChannelPool: &configpb.ChannelPoolConfig{
+			MinSize: 3,
+			MaxSize: 3,
+		},
+	}
+
+	dialUsedFor := make(map[string]*atomic.Int32)
+	dialUsedFor[lEndpoint] = &atomic.Int32{}
+	dialUsedFor[fEndpoint] = &atomic.Int32{}
+
+	conn, err := grpcgcp.NewGcpMultiEndpoint(
+		&grpcgcp.GCPMultiEndpointOptions{
+			GRPCgcpConfig: apiCfg,
+			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
+				defaultME: {
+					Endpoints: []string{lEndpoint, fEndpoint},
+				},
+				followerME: {
+					Endpoints: []string{fEndpoint, lEndpoint},
+				},
+			},
+			Default: defaultME,
+			DialFunc: func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error) {
+				dialUsedFor[target].Add(1)
+				return grpc.DialContext(ctx, target, dopts...)
+			},
+		},
+		grpc.WithInsecure(),
+	)
+
+	if err != nil {
+		t.Fatalf("NewMultiEndpointConn returns unexpected error: %v", err)
+	}
+
+	defer conn.Close()
+	c := pb.NewGreeterClient(conn)
+	tc := &testingClient{
+		c: c,
+		t: t,
+	}
+
+	// Make a call to make sure GCPMultiEndpoint is up and running.
+	tc.SayHelloWorks(context.Background(), lEndpoint)
+
+	if got, want := dialUsedFor[lEndpoint].Load(), int32(1); got != want {
+		t.Fatalf("provided dial function was called for %q endpoint %v times, want %v times", lEndpoint, got, want)
+	}
+
+	if got, want := dialUsedFor[fEndpoint].Load(), int32(1); got != want {
+		t.Fatalf("provided dial function was called for %q endpoint %v times, want %v times", fEndpoint, got, want)
+	}
 }
