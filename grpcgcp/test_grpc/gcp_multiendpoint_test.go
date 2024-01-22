@@ -27,10 +27,13 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp"
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/multiendpoint"
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	configpb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	pb "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/test_grpc/helloworld/helloworld"
@@ -760,5 +763,57 @@ func TestGcpMultiEndpointDialFunc(t *testing.T) {
 
 	if got, want := dialUsedFor[fEndpoint].Load(), int32(1); got != want {
 		t.Fatalf("provided dial function was called for %q endpoint %v times, want %v times", fEndpoint, got, want)
+	}
+}
+
+func TestGCPMultiEndpointGCPConfig(t *testing.T) {
+
+	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
+
+	defaultME, followerME := "default", "follower"
+
+	apiCfg := &configpb.ApiConfig{
+		ChannelPool: &configpb.ChannelPoolConfig{
+			MinSize: 2,
+			MaxSize: 3,
+		},
+	}
+
+	dialUsedFor := make(map[string]*atomic.Int32)
+	dialUsedFor[lEndpoint] = &atomic.Int32{}
+	dialUsedFor[fEndpoint] = &atomic.Int32{}
+
+	conn, err := grpcgcp.NewGcpMultiEndpoint(
+		&grpcgcp.GCPMultiEndpointOptions{
+			GRPCgcpConfig: apiCfg,
+			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
+				defaultME: {
+					Endpoints: []string{lEndpoint, fEndpoint},
+				},
+				followerME: {
+					Endpoints: []string{fEndpoint, lEndpoint},
+				},
+			},
+			Default: defaultME,
+			DialFunc: func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error) {
+				dialUsedFor[target].Add(1)
+				return grpc.DialContext(ctx, target, dopts...)
+			},
+		},
+		grpc.WithInsecure(),
+	)
+
+	if err != nil {
+		t.Fatalf("NewMultiEndpointConn returns unexpected error: %v", err)
+	}
+
+	defer conn.Close()
+
+	wantCfg := proto.Clone(apiCfg)
+	// This change of the initial config should not be reflected in the following comparison.
+	apiCfg.GetChannelPool().MaxSize = 5
+
+	if diff := cmp.Diff(wantCfg, conn.GCPConfig(), protocmp.Transform()); diff != "" {
+		t.Fatalf("conn.GCPConfig() returned unexpected difference in protobuf messages (-want +got):\n%s", diff)
 	}
 }
