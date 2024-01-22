@@ -29,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/status"
 )
 
@@ -36,20 +37,26 @@ import (
 var deErr = status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
 
 func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
-	return &gcpPicker{
+	gp := &gcpPicker{
 		gb:     gb,
 		scRefs: readySCRefs,
 	}
+	gp.log = NewGCPLogger(gb.log, fmt.Sprintf("[gcpPicker %p]", gp))
+	return gp
 }
 
 type gcpPicker struct {
 	gb     *gcpBalancer
 	mu     sync.Mutex
 	scRefs []*subConnRef
+	log    grpclog.LoggerV2
 }
 
 func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if len(p.scRefs) <= 0 {
+		if p.log.V(FINEST) {
+			p.log.Info("returning balancer.ErrNoSubConnAvailable as no subconns are available.")
+		}
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
@@ -77,6 +84,9 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		return balancer.PickResult{}, err
 	}
 	if scRef == nil {
+		if p.log.V(FINEST) {
+			p.log.Info("returning balancer.ErrNoSubConnAvailable as no SubConn was picked.")
+		}
 		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
@@ -100,6 +110,10 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		case grpc_gcp.AffinityConfig_UNBIND:
 			p.gb.unbindSubConn(boundKey)
 		}
+	}
+
+	if p.log.V(FINEST) {
+		p.log.Infof("picked SubConn: %p", scRef.subConn)
 	}
 	return balancer.PickResult{SubConn: scRef.subConn, Done: callback}, nil
 }
@@ -143,6 +157,9 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.Affi
 	var err error
 	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
 		scRef = p.gb.getSubConnRoundRobin()
+		if p.log.V(FINEST) {
+			p.log.Infof("picking SubConn for round-robin bind: %p", scRef.subConn)
+		}
 	} else {
 		scRef, err = p.getSubConnRef(boundKey)
 	}

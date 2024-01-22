@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/multiendpoint"
 	"google.golang.org/grpc"
@@ -39,7 +40,7 @@ var (
 	}
 )
 
-var log = grpclog.Component("GCPMultiEndpoint")
+var gmeCounter uint32
 
 type contextMEKey int
 
@@ -123,6 +124,7 @@ type GCPMultiEndpoint struct {
 	pools       map[string]*monitoredConn
 	opts        []grpc.DialOption
 	gcpConfig   *pb.ApiConfig
+	log         grpclog.LoggerV2
 
 	grpc.ClientConnInterface
 }
@@ -153,7 +155,10 @@ func (gme *GCPMultiEndpoint) Close() error {
 		mc.stopMonitoring()
 		if err := mc.conn.Close(); err != nil {
 			errs = append(errs, err)
-			log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
+			gme.log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
+		}
+		if gme.log.V(FINE) {
+			gme.log.Infof("closed channel pool for %q endpoint.", e)
 		}
 	}
 	return errs.Combine()
@@ -187,6 +192,7 @@ func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOptio
 		defaultName: meOpts.Default,
 		opts:        o,
 		gcpConfig:   meOpts.GRPCgcpConfig,
+		log:         NewGCPLogger(compLogger, fmt.Sprintf("[GCPMultiEndpoint #%d]", atomic.AddUint32(&gmeCounter, 1))),
 	}
 	if err := gme.UpdateMultiEndpoints(meOpts); err != nil {
 		return nil, err
@@ -233,6 +239,9 @@ func (sm *monitoredConn) monitor(ctx context.Context) {
 	currentState := sm.conn.GetState()
 	for sm.conn.WaitForStateChange(ctx, currentState) {
 		currentState = sm.conn.GetState()
+		if sm.gme.log.V(FINE) {
+			sm.gme.log.Infof("%q endpoint state changed to %v", sm.endpoint, currentState)
+		}
 		// Inform all multiendpoints.
 		for _, me := range sm.gme.mes {
 			me.SetEndpointAvailability(sm.endpoint, currentState == connectivity.Ready)
@@ -283,6 +292,9 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 			if err != nil {
 				return err
 			}
+			if gme.log.V(FINE) {
+				gme.log.Infof("created new channel pool for %q endpoint.", e)
+			}
 			gme.pools[e] = newMonitoredConn(e, conn, gme)
 		}
 	}
@@ -296,6 +308,9 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 		}
 
 		// Add new MultiEndpoint.
+		if gme.log.V(FINE) {
+			gme.log.Infof("creating new %q multiendpoint.", name)
+		}
 		me, err := multiendpoint.NewMultiEndpoint(meo)
 		if err != nil {
 			return err
@@ -308,6 +323,9 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 	for name := range gme.mes {
 		if _, ok := meOpts.MultiEndpoints[name]; !ok {
 			delete(gme.mes, name)
+			if gme.log.V(FINE) {
+				gme.log.Infof("removed obsolete %q multiendpoint.", name)
+			}
 		}
 	}
 
@@ -315,7 +333,10 @@ func (gme *GCPMultiEndpoint) UpdateMultiEndpoints(meOpts *GCPMultiEndpointOption
 	for e, mc := range gme.pools {
 		if _, ok := validPools[e]; !ok {
 			if err := mc.conn.Close(); err != nil {
-				log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
+				gme.log.Errorf("error while closing the pool for %q endpoint: %v", e, err)
+			}
+			if gme.log.V(FINE) {
+				gme.log.Infof("closed channel pool for %q endpoint.", e)
 			}
 			mc.stopMonitoring()
 			delete(gme.pools, e)

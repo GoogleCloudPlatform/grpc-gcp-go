@@ -275,14 +275,17 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 		},
 	}
 
-	picker := newGCPPicker(scRefs, &gcpBalancer{cfg: &GcpBalancerConfig{
-		ApiConfig: &pb.ApiConfig{
-			ChannelPool: &pb.ChannelPoolConfig{
-				MaxSize:                          10,
-				MaxConcurrentStreamsLowWatermark: 100,
+	picker := newGCPPicker(scRefs, &gcpBalancer{
+		cfg: &GcpBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MaxSize:                          10,
+					MaxConcurrentStreamsLowWatermark: 100,
+				},
 			},
 		},
-	}})
+		log: compLogger,
+	})
 
 	ctx := context.Background()
 
@@ -329,6 +332,7 @@ func TestPickNewSubConn(t *testing.T) {
 				},
 			},
 		},
+		log: compLogger,
 	}
 
 	picker := newGCPPicker(scRefs, b)
