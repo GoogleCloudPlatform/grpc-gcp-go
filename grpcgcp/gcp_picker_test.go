@@ -276,7 +276,7 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 	}
 
 	picker := newGCPPicker(scRefs, &gcpBalancer{
-		cfg: &GcpBalancerConfig{
+		cfg: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MaxSize:                          10,
@@ -324,7 +324,7 @@ func TestPickNewSubConn(t *testing.T) {
 		cc:       mockCC,
 		scRefs:   mp,
 		scStates: make(map[balancer.SubConn]connectivity.State),
-		cfg: &GcpBalancerConfig{
+		cfg: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MaxSize:                          10,
@@ -376,7 +376,7 @@ func TestBindSubConn(t *testing.T) {
 	}
 
 	testMethod := "testBindMethod"
-	gcpcfg := &GcpBalancerConfig{
+	gcpcfg := &GCPBalancerConfig{
 		ApiConfig: &pb.ApiConfig{
 			ChannelPool: &pb.ChannelPoolConfig{
 				MaxSize:                          2,
@@ -463,7 +463,7 @@ func TestPickMappedSubConn(t *testing.T) {
 	}
 
 	testMethod := "testMethod"
-	gcpcfg := &GcpBalancerConfig{
+	gcpcfg := &GCPBalancerConfig{
 		ApiConfig: &pb.ApiConfig{
 			ChannelPool: &pb.ChannelPoolConfig{
 				MaxSize:                          2,
@@ -559,7 +559,7 @@ func TestPickSubConnWithFallback(t *testing.T) {
 		ResolverState: resolver.State{
 			Addresses: b.addrs,
 		},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          3,
@@ -664,7 +664,7 @@ func BenchmarkPick(b *testing.B) {
 				ResolverState: resolver.State{
 					Addresses: []resolver.Address{{Addr: "127.0.0.1"}},
 				},
-				BalancerConfig: &GcpBalancerConfig{
+				BalancerConfig: &GCPBalancerConfig{
 					ApiConfig: &pb.ApiConfig{
 						ChannelPool: &pb.ChannelPoolConfig{
 							MinSize:                          uint32(poolSize),

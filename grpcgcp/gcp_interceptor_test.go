@@ -36,7 +36,7 @@ func TestGCPUnaryClientInterceptor(t *testing.T) {
 	wantMethod := "someMethod"
 	wantReq := "requestMessage"
 	wantRepl := "replyMessage"
-	wantGcpCtx := &gcpContext{
+	wantGCPCtx := &gcpContext{
 		reqMsg:   wantReq,
 		replyMsg: wantRepl,
 	}
@@ -66,10 +66,10 @@ func TestGCPUnaryClientInterceptor(t *testing.T) {
 	if !invCalled {
 		t.Fatalf("provided grpc.UnaryInvoker function was not called")
 	}
-	gotGcpCtx, hasGcpCtx := gotCtx.Value(gcpKey).(*gcpContext)
-	if !hasGcpCtx {
+	gotGCPCtx, hasGCPCtx := gotCtx.Value(gcpKey).(*gcpContext)
+	if !hasGCPCtx {
 		t.Errorf("provided grpc.UnaryInvoker function was called with context without gcpContext")
-	} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+	} else if diff := cmp.Diff(wantGCPCtx, gotGCPCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
 		t.Errorf("provided grpc.UnaryInvoker function was called with unexpected gcpContext (-want, +got):\n%s", diff)
 	}
 	if gotMethod != wantMethod {
@@ -113,7 +113,7 @@ func TestGCPStreamClientInterceptor(t *testing.T) {
 	wantMethod := "someMethod"
 	wantReq := "someRequest"
 	wantRes := &fakeResp{}
-	wantGcpCtx := &gcpContext{
+	wantGCPCtx := &gcpContext{
 		reqMsg: wantReq,
 	}
 	wantSD := &grpc.StreamDesc{}
@@ -123,10 +123,10 @@ func TestGCPStreamClientInterceptor(t *testing.T) {
 	streamerCalled := false
 	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		streamerCalled = true
-		gotGcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
-		if !hasGcpCtx {
+		gotGCPCtx, hasGCPCtx := ctx.Value(gcpKey).(*gcpContext)
+		if !hasGCPCtx {
 			t.Errorf("grpc.Streamer called with context without gcpContext")
-		} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+		} else if diff := cmp.Diff(wantGCPCtx, gotGCPCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
 			t.Errorf("grpc.Streamer called with unexpected gcpContext (-want, +got):\n%s", diff)
 		}
 		if desc != wantSD {
@@ -179,7 +179,7 @@ func TestGCPStreamClientInterceptorCallingReadBeforeSend(t *testing.T) {
 	wantMethod := "someMethod"
 	wantReq := "someRequest"
 	wantRes := &fakeResp{}
-	wantGcpCtx := &gcpContext{
+	wantGCPCtx := &gcpContext{
 		reqMsg: wantReq,
 	}
 	wantSD := &grpc.StreamDesc{}
@@ -189,10 +189,10 @@ func TestGCPStreamClientInterceptorCallingReadBeforeSend(t *testing.T) {
 	streamerCalled := false
 	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		streamerCalled = true
-		gotGcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
-		if !hasGcpCtx {
+		gotGCPCtx, hasGCPCtx := ctx.Value(gcpKey).(*gcpContext)
+		if !hasGCPCtx {
 			t.Errorf("grpc.Streamer called with context without gcpContext")
-		} else if diff := cmp.Diff(wantGcpCtx, gotGcpCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
+		} else if diff := cmp.Diff(wantGCPCtx, gotGCPCtx, cmp.AllowUnexported(gcpContext{})); diff != "" {
 			t.Errorf("grpc.Streamer called with unexpected gcpContext (-want, +got):\n%s", diff)
 		}
 		if desc != wantSD {

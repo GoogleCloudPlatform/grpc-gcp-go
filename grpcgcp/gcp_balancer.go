@@ -56,7 +56,7 @@ type gcpBalancerBuilder struct {
 	balancer.ConfigParser
 }
 
-type GcpBalancerConfig struct {
+type GCPBalancerConfig struct {
 	serviceconfig.LoadBalancingConfig
 	*pb.ApiConfig
 }
@@ -89,11 +89,11 @@ func (*gcpBalancerBuilder) Name() string {
 	return Name
 }
 
-// ParseConfig converts raw json config into GcpBalancerConfig.
+// ParseConfig converts raw json config into GCPBalancerConfig.
 // This is called by ClientConn on any load balancer config update.
 // After parsing the config, ClientConn calls UpdateClientConnState passing the config.
 func (*gcpBalancerBuilder) ParseConfig(j json.RawMessage) (serviceconfig.LoadBalancingConfig, error) {
-	c := &GcpBalancerConfig{
+	c := &GCPBalancerConfig{
 		ApiConfig: &pb.ApiConfig{},
 	}
 	err := protojson.Unmarshal(j, c)
@@ -196,7 +196,7 @@ func (ref *subConnRef) gotResp() {
 }
 
 type gcpBalancer struct {
-	cfg       *GcpBalancerConfig
+	cfg       *GCPBalancerConfig
 	methodCfg map[string]*pb.AffinityConfig
 
 	addrs   []resolver.Address
@@ -221,14 +221,14 @@ type gcpBalancer struct {
 	log    grpclog.LoggerV2
 }
 
-func (gb *gcpBalancer) initializeConfig(cfg *GcpBalancerConfig) {
-	gb.cfg = &GcpBalancerConfig{
+func (gb *gcpBalancer) initializeConfig(cfg *GCPBalancerConfig) {
+	gb.cfg = &GCPBalancerConfig{
 		ApiConfig: &pb.ApiConfig{
 			ChannelPool: &pb.ChannelPoolConfig{},
 		},
 	}
 	if cfg != nil && cfg.ApiConfig != nil {
-		gb.cfg = &GcpBalancerConfig{
+		gb.cfg = &GCPBalancerConfig{
 			ApiConfig: proto.Clone(cfg.ApiConfig).(*pb.ApiConfig),
 		}
 	}
@@ -277,9 +277,9 @@ func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error
 	}
 	gb.addrs = addrs
 	if gb.cfg == nil {
-		cfg, ok := ccs.BalancerConfig.(*GcpBalancerConfig)
+		cfg, ok := ccs.BalancerConfig.(*GCPBalancerConfig)
 		if !ok && ccs.BalancerConfig != nil {
-			return fmt.Errorf("provided config is not GcpBalancerConfig: %v", ccs.BalancerConfig)
+			return fmt.Errorf("provided config is not GCPBalancerConfig: %v", ccs.BalancerConfig)
 		}
 		gb.initializeConfig(cfg)
 	}
