@@ -61,7 +61,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	}
 
 	ctx := info.Ctx
-	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
+	gcpCtx, hasGCPCtx := ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 	locator := ""
 	var cmd grpc_gcp.AffinityConfig_Command
@@ -69,7 +69,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 	if mcfg, ok := p.gb.methodCfg[info.FullMethodName]; ok {
 		locator = mcfg.GetAffinityKey()
 		cmd = mcfg.GetCommand()
-		if hasGcpCtx && (cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND) {
+		if hasGCPCtx && (cmd == grpc_gcp.AffinityConfig_BOUND || cmd == grpc_gcp.AffinityConfig_UNBIND) {
 			a, err := getAffinityKeysFromMessage(locator, gcpCtx.reqMsg)
 			if err != nil {
 				return balancer.PickResult{}, fmt.Errorf(

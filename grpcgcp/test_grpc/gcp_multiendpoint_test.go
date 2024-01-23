@@ -250,7 +250,7 @@ type testingClient struct {
 	t *testing.T
 }
 
-func TestGcpMultiEndpoint(t *testing.T) {
+func TestGCPMultiEndpoint(t *testing.T) {
 
 	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
 	newE, newE2 := "127.0.0.1:50051", "127.0.0.2:50051"
@@ -272,7 +272,7 @@ func TestGcpMultiEndpoint(t *testing.T) {
 		},
 	}
 
-	conn, err := grpcgcp.NewGcpMultiEndpoint(
+	conn, err := grpcgcp.NewGCPMultiEndpoint(
 		&grpcgcp.GCPMultiEndpointOptions{
 			GRPCgcpConfig: apiCfg,
 			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
@@ -439,7 +439,7 @@ func TestGcpMultiEndpoint(t *testing.T) {
 	tc.SayHelloWorksWithin(context.Background(), fEndpoint, waitTO)
 }
 
-func TestGcpMultiEndpointWithDelays(t *testing.T) {
+func TestGCPMultiEndpointWithDelays(t *testing.T) {
 
 	recoveryTimeout := time.Millisecond * 500
 	switchingDelay := time.Millisecond * 700
@@ -465,7 +465,7 @@ func TestGcpMultiEndpointWithDelays(t *testing.T) {
 		},
 	}
 
-	conn, err := grpcgcp.NewGcpMultiEndpoint(
+	conn, err := grpcgcp.NewGCPMultiEndpoint(
 		&grpcgcp.GCPMultiEndpointOptions{
 			GRPCgcpConfig: apiCfg,
 			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
@@ -669,7 +669,7 @@ func TestGcpMultiEndpointWithDelays(t *testing.T) {
 	tc.SayHelloWorksWithin(context.Background(), fEndpoint, waitTO+switchingDelay)
 }
 
-func TestGcpMultiEndpointInstantShutdown(t *testing.T) {
+func TestGCPMultiEndpointInstantShutdown(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Panic: %v", r)
@@ -685,7 +685,7 @@ func TestGcpMultiEndpointInstantShutdown(t *testing.T) {
 		},
 	}
 
-	conn, err := grpcgcp.NewGcpMultiEndpoint(
+	conn, err := grpcgcp.NewGCPMultiEndpoint(
 		&grpcgcp.GCPMultiEndpointOptions{
 			GRPCgcpConfig: apiCfg,
 			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
@@ -702,11 +702,11 @@ func TestGcpMultiEndpointInstantShutdown(t *testing.T) {
 		t.Fatalf("NewMultiEndpointConn returns unexpected error: %v", err)
 	}
 
-	// Closing GcpMultiEndpoint immediately should not cause panic.
+	// Closing GCPMultiEndpoint immediately should not cause panic.
 	conn.Close()
 }
 
-func TestGcpMultiEndpointDialFunc(t *testing.T) {
+func TestGCPMultiEndpointDialFunc(t *testing.T) {
 
 	lEndpoint, fEndpoint := "localhost:50051", "127.0.0.3:50051"
 
@@ -723,7 +723,7 @@ func TestGcpMultiEndpointDialFunc(t *testing.T) {
 	dialUsedFor[lEndpoint] = &atomic.Int32{}
 	dialUsedFor[fEndpoint] = &atomic.Int32{}
 
-	conn, err := grpcgcp.NewGcpMultiEndpoint(
+	conn, err := grpcgcp.NewGCPMultiEndpoint(
 		&grpcgcp.GCPMultiEndpointOptions{
 			GRPCgcpConfig: apiCfg,
 			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{
@@ -783,7 +783,7 @@ func TestGCPMultiEndpointGCPConfig(t *testing.T) {
 	dialUsedFor[lEndpoint] = &atomic.Int32{}
 	dialUsedFor[fEndpoint] = &atomic.Int32{}
 
-	conn, err := grpcgcp.NewGcpMultiEndpoint(
+	conn, err := grpcgcp.NewGCPMultiEndpoint(
 		&grpcgcp.GCPMultiEndpointOptions{
 			GRPCgcpConfig: apiCfg,
 			MultiEndpoints: map[string]*multiendpoint.MultiEndpointOptions{

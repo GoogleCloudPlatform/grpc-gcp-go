@@ -109,7 +109,7 @@ func TestDefaultConfig(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with empty config.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState:  resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{},
+		BalancerConfig: &GCPBalancerConfig{},
 	})
 
 	if diff := cmp.Diff(wantCfg, b.cfg.ApiConfig, protocmp.Transform()); diff != "" {
@@ -133,7 +133,7 @@ func TestConfig(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: testApiConfig,
 		},
 	})
@@ -205,7 +205,7 @@ func TestCreatesMinSubConns(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          3,
@@ -247,7 +247,7 @@ func TestCreatesUpToMaxSubConns(t *testing.T) {
 	maxSize := 5
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          uint32(minSize),
@@ -324,7 +324,7 @@ func TestRefreshesSubConnsWhenUnresponsive(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          3,
@@ -463,7 +463,7 @@ func TestRefreshingSubConnsDoesNotAffectConnState(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          2,
@@ -557,7 +557,7 @@ func TestShutdownWhileRefreshing(t *testing.T) {
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          2,
@@ -632,7 +632,7 @@ func TestRoundRobinForBind(t *testing.T) {
 	streamsWatermark := 10
 	b.UpdateClientConnState(balancer.ClientConnState{
 		ResolverState: resolver.State{},
-		BalancerConfig: &GcpBalancerConfig{
+		BalancerConfig: &GCPBalancerConfig{
 			ApiConfig: &pb.ApiConfig{
 				ChannelPool: &pb.ChannelPoolConfig{
 					MinSize:                          uint32(minSize),

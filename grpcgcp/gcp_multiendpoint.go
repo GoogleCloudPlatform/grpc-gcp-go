@@ -53,7 +53,7 @@ func FromMEContext(ctx context.Context) (string, bool) {
 
 // GCPMultiEndpoint holds the state of MultiEndpoints-enabled gRPC client connection.
 //
-// The purposes of GcpMultiEndpoint are:
+// The purposes of GCPMultiEndpoint are:
 //
 //   - Fallback to an alternative endpoint (host:port) of a gRPC service when the original
 //     endpoint is completely unavailable.
@@ -124,7 +124,7 @@ type GCPMultiEndpoint struct {
 	grpc.ClientConnInterface
 }
 
-// Make sure GcpMultiEndpoint implements grpc.ClientConnInterface.
+// Make sure GCPMultiEndpoint implements grpc.ClientConnInterface.
 var _ grpc.ClientConnInterface = (*GCPMultiEndpoint)(nil)
 
 func (gme *GCPMultiEndpoint) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
@@ -176,12 +176,20 @@ type GCPMultiEndpointOptions struct {
 	DialFunc func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
-// NewGcpMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
+// NewGCPMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
+// connection.
+//
+// Deprecated: use NewGCPMultiEndpoint.
+func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOption) (*GCPMultiEndpoint, error) {
+	return NewGCPMultiEndpoint(meOpts, opts...)
+}
+
+// NewGCPMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
 // connection.
 //
 // [GCPMultiEndpoint] implements [grpc.ClientConnInterface] and can be used
 // as a [grpc.ClientConn] when creating gRPC clients.
-func NewGcpMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOption) (*GCPMultiEndpoint, error) {
+func NewGCPMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOption) (*GCPMultiEndpoint, error) {
 	// Read config, create multiendpoints and pools.
 	o, err := makeOpts(meOpts, opts)
 	if err != nil {
