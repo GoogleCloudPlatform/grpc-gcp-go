@@ -19,6 +19,7 @@
 package grpcgcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -153,12 +154,13 @@ func (cse *connectivityStateEvaluator) recordTransition(
 // connectivity state, affinity count and streams count.
 type subConnRef struct {
 	subConn     balancer.SubConn
-	affinityCnt int32     // Keeps track of the number of keys bound to the subConn.
-	streamsCnt  int32     // Keeps track of the number of streams opened on the subConn.
-	lastResp    time.Time // Timestamp of the last response from the server.
-	deCalls     uint32    // Keeps track of deadline exceeded calls since last response.
-	refreshing  bool      // If this subconn is in the process of refreshing.
-	refreshCnt  uint32    // Number of refreshes since last response.
+	stateSignal chan struct{} // This channel is closed and re-created when subConn or its state changes.
+	affinityCnt int32         // Keeps track of the number of keys bound to the subConn.
+	streamsCnt  int32         // Keeps track of the number of streams opened on the subConn.
+	lastResp    time.Time     // Timestamp of the last response from the server.
+	deCalls     uint32        // Keeps track of deadline exceeded calls since last response.
+	refreshing  bool          // If this subconn is in the process of refreshing.
+	refreshCnt  uint32        // Number of refreshes since last response.
 }
 
 func (ref *subConnRef) getAffinityCnt() int32 {
@@ -338,8 +340,9 @@ func (gb *gcpBalancer) addSubConn() {
 		return
 	}
 	gb.scRefs[sc] = &subConnRef{
-		subConn:  sc,
-		lastResp: time.Now(),
+		subConn:     sc,
+		stateSignal: make(chan struct{}),
+		lastResp:    time.Now(),
 	}
 	gb.scStates[sc] = connectivity.Idle
 	gb.scRefList = append(gb.scRefList, gb.scRefs[sc])
@@ -379,7 +382,20 @@ func (gb *gcpBalancer) getSubConnRoundRobin() *subConnRef {
 	if len(gb.scRefList) == 0 {
 		gb.newSubConn()
 	}
-	return gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
+	scRef := gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
+
+	// Wait until SubConn is ready.
+	for gb.scStates[scRef.subConn] != connectivity.Ready {
+		grpclog.Infof("grpcgcp.gcpBalancer: scRef is not ready: %v", gb.scStates[scRef.subConn])
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		select {
+		case <-ctx.Done():
+		case <-scRef.stateSignal:
+		}
+		cancel()
+	}
+
+	return scRef
 }
 
 // bindSubConn binds the given affinity key to an existing subConnRef.
@@ -509,6 +525,12 @@ func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubC
 			ConnectivityState: gb.state,
 			Picker:            gb.picker,
 		})
+	}
+
+	if scRef := gb.scRefs[sc]; scRef != nil {
+		// Inform of the state change.
+		close(scRef.stateSignal)
+		scRef.stateSignal = make(chan struct{})
 	}
 }
 
