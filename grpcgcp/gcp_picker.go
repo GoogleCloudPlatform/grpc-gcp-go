@@ -151,18 +151,18 @@ func (p *gcpPicker) detectUnresponsive(ctx context.Context, scRef *subConnRef, c
 }
 
 func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var scRef *subConnRef
-	var err error
 	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
-		scRef = p.gb.getSubConnRoundRobin()
+		scRef := p.gb.getSubConnRoundRobin()
 		if p.log.V(FINEST) {
 			p.log.Infof("picking SubConn for round-robin bind: %p", scRef.subConn)
 		}
-	} else {
-		scRef, err = p.getSubConnRef(boundKey)
+		scRef.streamsIncr()
+		return scRef, nil
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scRef, err := p.getSubConnRef(boundKey)
 	if err != nil {
 		return nil, err
 	}
