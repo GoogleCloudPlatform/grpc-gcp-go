@@ -174,6 +174,7 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.Affi
 
 // getSubConnRef returns the subConnRef object that contains the subconn
 // ready to be used by picker.
+// Must be called holding the picker mutex lock.
 func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	if boundKey != "" {
 		if ref, ok := p.gb.getReadySubConnRef(boundKey); ok {
@@ -184,6 +185,7 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	return p.getLeastBusySubConnRef()
 }
 
+// Must be called holding the picker mutex lock.
 func (p *gcpPicker) getLeastBusySubConnRef() (*subConnRef, error) {
 	minScRef := p.scRefs[0]
 	minStreamsCnt := minScRef.getStreamsCnt()
