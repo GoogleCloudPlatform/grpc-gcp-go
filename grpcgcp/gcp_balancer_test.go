@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -618,13 +619,14 @@ func TestRoundRobinForBind(t *testing.T) {
 	scs := []*mocks.MockSubConn{}
 	mockCC := mocks.NewMockClientConn(mockCtrl)
 	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().RemoveSubConn(gomock.Any()).Times(1)
 	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
 		newSC := mocks.NewMockSubConn(mockCtrl)
 		newSC.EXPECT().Connect().MinTimes(1)
 		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
 		scs = append(scs, newSC)
 		return newSC, nil
-	}).Times(4)
+	}).Times(5)
 
 	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
 	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
@@ -667,10 +669,29 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
+	start := time.Now()
+	delay := time.Millisecond * 345
+	margin := time.Millisecond * 50
+	// Bring other subconns to ready with some delay.
+	go func() {
+		time.Sleep(delay)
+		b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+		b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}()
+
 	// Expect 0 subconn because the picker should pick even non-ready subcons for binding calls in a round-robin manner.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
 	if want := scs[0]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Also, when round-robin for bind operations is enabled, the picker must wait until subconn became ready.
+	elapsed := time.Now().Sub(start)
+	if elapsed < delay {
+		t.Fatalf("gcpPicker.Pick returns before subconn became active")
+	}
+	if elapsed > delay+margin {
+		t.Fatalf("gcpPicker.Pick waited too long after subcon became active: %v, want <=%v", delay+margin-elapsed, margin)
 	}
 
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
@@ -693,10 +714,6 @@ func TestRoundRobinForBind(t *testing.T) {
 	if want := scs[1]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
-
-	// Bring other subconns to ready.
-	b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
-	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
 
 	// Create more regular calls to reach the limit (watermark*subconns - 6 calls initiated above) to spawn new subconn.
 	for i := 0; i < streamsWatermark*minSize-6; i++ {
@@ -722,15 +739,211 @@ func TestRoundRobinForBind(t *testing.T) {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
 	}
 
+	// Instead of moving subconn 3 to ready, we replace that with subconn 4 and make that ready
+	// to test that we catch replaced subconn state change. All this happens after Pick is called.
+	go func() {
+		start = time.Now()
+		time.Sleep(delay)
+		b.refresh(b.scRefs[scs[3]])
+		b.UpdateSubConnState(scs[4], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}()
+
 	// Extends to newly created subconn.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
-	if want := scs[3]; pr.SubConn != want || err != nil {
+	if want := scs[4]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	elapsed = time.Now().Sub(start)
+	if elapsed < delay {
+		t.Fatalf("gcpPicker.Pick returns before subconn became active")
+	}
+	if elapsed > delay+margin {
+		t.Fatalf("gcpPicker.Pick waited too long after subcon became active: %v, want <=%v", delay+margin-elapsed, margin)
 	}
 
 	// Cycles to the first subconn.
 	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.TODO()})
 	if want := scs[0]; pr.SubConn != want || err != nil {
 		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+}
+
+func TestRoundRobinBindShouldNotBlockOtherCalls(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	// A slice to store all SubConns created by gcpBalancer's ClientConn.
+	scs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().MinTimes(1)
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		scs = append(scs, newSC)
+		return newSC, nil
+	}).Times(3)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	minSize := 3
+	streamsWatermark := 10
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GCPBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          uint32(minSize),
+					MaxSize:                          10,
+					MaxConcurrentStreamsLowWatermark: uint32(streamsWatermark),
+					BindPickStrategy:                 pb.ChannelPoolConfig_ROUND_ROBIN,
+				},
+				Method: []*pb.MethodConfig{
+					{
+						Name: []string{"dummyService/createSession"},
+						Affinity: &pb.AffinityConfig{
+							Command:     pb.AffinityConfig_BIND,
+							AffinityKey: "dummykey",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if want := minSize; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+
+	// Make subConn 1 ready.
+	b.UpdateSubConnState(scs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	delay := time.Millisecond * 345
+	// Bring other subconns to ready with some delay. This should block picking for the bind call
+	// below for at least that amount of time.
+	go func() {
+		time.Sleep(delay)
+		b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+		b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}()
+
+	affinityPickComplete := false
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		// Expect 0 subconn because the picker should pick even non-ready subcons for binding calls in a round-robin manner.
+		// This is expected to wait until the subconn 0 is ready.
+		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: context.Background()})
+		if want := scs[0]; pr.SubConn != want || err != nil {
+			t.Errorf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+		}
+		affinityPickComplete = true
+	}()
+
+	wg.Wait()
+
+	// This pick should not wait and return subconn 1 immediately.
+	// Expect picker will pick the only ready subconn for non-binding call.
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/noAffinity", Ctx: context.Background()})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Fatalf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	// Expect the pick for no affinity call is made before createSession pick is made. I.e., without waiting.
+	if affinityPickComplete {
+		t.Fatalf("gcpPicker.Pick waited for previous bind pick to be made. No delay expected.")
+	}
+}
+
+func TestRoundRobinBindShouldRespectDeadlineAndCancellation(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	// A slice to store all SubConns created by gcpBalancer's ClientConn.
+	scs := []*mocks.MockSubConn{}
+	mockCC := mocks.NewMockClientConn(mockCtrl)
+	mockCC.EXPECT().UpdateState(gomock.Any()).AnyTimes()
+	mockCC.EXPECT().NewSubConn(gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ interface{}) (*mocks.MockSubConn, error) {
+		newSC := mocks.NewMockSubConn(mockCtrl)
+		newSC.EXPECT().Connect().MinTimes(1)
+		newSC.EXPECT().UpdateAddresses(gomock.Any()).AnyTimes()
+		scs = append(scs, newSC)
+		return newSC, nil
+	}).Times(3)
+
+	b := newBuilder().Build(mockCC, balancer.BuildOptions{}).(*gcpBalancer)
+	// Simulate ClientConn calls UpdateClientConnState with the config provided to Dial.
+	minSize := 3
+	streamsWatermark := 10
+	b.UpdateClientConnState(balancer.ClientConnState{
+		ResolverState: resolver.State{},
+		BalancerConfig: &GCPBalancerConfig{
+			ApiConfig: &pb.ApiConfig{
+				ChannelPool: &pb.ChannelPoolConfig{
+					MinSize:                          uint32(minSize),
+					MaxSize:                          10,
+					MaxConcurrentStreamsLowWatermark: uint32(streamsWatermark),
+					BindPickStrategy:                 pb.ChannelPoolConfig_ROUND_ROBIN,
+				},
+				Method: []*pb.MethodConfig{
+					{
+						Name: []string{"dummyService/createSession"},
+						Affinity: &pb.AffinityConfig{
+							Command:     pb.AffinityConfig_BIND,
+							AffinityKey: "dummykey",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if want := minSize; len(b.scRefs) != want {
+		t.Fatalf("gcpBalancer scRefs length is %v, want %v", len(b.scRefs), want)
+	}
+
+	// Make subConn 1 ready so that we don't end up with errPicker.
+	b.UpdateSubConnState(scs[2], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+
+	timeout := time.Millisecond * 30
+	margin := time.Millisecond * 10
+	delay := time.Millisecond * 345
+	// Bring other subconns to ready with some delay. This should block picking for the bind call
+	// below for at least that amount of time. We need to make subconns ready so that the picks
+	// below don't hang forever.
+	go func() {
+		time.Sleep(delay)
+		b.UpdateSubConnState(scs[0], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+		b.UpdateSubConnState(scs[1], balancer.SubConnState{ConnectivityState: connectivity.Ready})
+	}()
+
+	start := time.Now()
+	cCtx, cCancel := context.WithCancel(context.Background())
+	defer cCancel()
+	go func() {
+		time.Sleep(timeout)
+		cCancel()
+	}()
+	pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: cCtx})
+	if want := scs[0]; pr.SubConn != want || err != nil {
+		t.Errorf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	if elapsed := time.Now().Sub(start); elapsed > timeout+margin {
+		t.Fatalf("gcpPicker.Pick did not respect cancellation, took: %v, want <=%v", elapsed, timeout+margin)
+	}
+
+	start = time.Now()
+	dCtx, dCancel := context.WithTimeout(context.Background(), timeout)
+	defer dCancel()
+	pr, err = b.picker.Pick(balancer.PickInfo{FullMethodName: "dummyService/createSession", Ctx: dCtx})
+	if want := scs[1]; pr.SubConn != want || err != nil {
+		t.Errorf("gcpPicker.Pick returns %v, %v, want: %v, nil", pr.SubConn, err, want)
+	}
+
+	if elapsed := time.Now().Sub(start); elapsed > timeout+margin {
+		t.Fatalf("gcpPicker.Pick did not respect deadline, took: %v, want <=%v", elapsed, timeout+margin)
 	}
 }

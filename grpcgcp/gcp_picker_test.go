@@ -255,21 +255,25 @@ func TestPickSubConnWithLeastStreams(t *testing.T) {
 	var scRefs = []*subConnRef{
 		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
+			stateSignal: make(chan struct{}),
 			affinityCnt: 0,
 			streamsCnt:  1,
 		},
 		{
 			subConn:     okSC,
+			stateSignal: make(chan struct{}),
 			affinityCnt: 0,
 			streamsCnt:  0,
 		},
 		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
+			stateSignal: make(chan struct{}),
 			affinityCnt: 0,
 			streamsCnt:  3,
 		},
 		{
 			subConn:     mocks.NewMockSubConn(mockCtrl),
+			stateSignal: make(chan struct{}),
 			affinityCnt: 0,
 			streamsCnt:  5,
 		},
@@ -308,6 +312,7 @@ func TestPickNewSubConn(t *testing.T) {
 	var scRefs = []*subConnRef{
 		{
 			subConn:     mockSC,
+			stateSignal: make(chan struct{}),
 			affinityCnt: 0,
 			streamsCnt:  100,
 		},
@@ -366,11 +371,13 @@ func TestBindSubConn(t *testing.T) {
 	mp := make(map[balancer.SubConn]*subConnRef)
 	mp[scBusy] = &subConnRef{
 		subConn:     scBusy,
+		stateSignal: make(chan struct{}),
 		affinityCnt: 0,
 		streamsCnt:  5,
 	}
 	mp[scIdle] = &subConnRef{
 		subConn:     scIdle,
+		stateSignal: make(chan struct{}),
 		affinityCnt: 0,
 		streamsCnt:  0,
 	}
@@ -453,11 +460,13 @@ func TestPickMappedSubConn(t *testing.T) {
 	mp := make(map[balancer.SubConn]*subConnRef)
 	mp[mockSCnotmapped] = &subConnRef{
 		subConn:     mockSCnotmapped,
+		stateSignal: make(chan struct{}),
 		affinityCnt: 0,
 		streamsCnt:  0,
 	}
 	mp[mockSCmapped] = &subConnRef{
 		subConn:     mockSCmapped,
+		stateSignal: make(chan struct{}),
 		affinityCnt: 0,
 		streamsCnt:  5,
 	}

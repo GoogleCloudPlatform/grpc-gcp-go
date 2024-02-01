@@ -79,7 +79,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		}
 	}
 
-	scRef, err := p.getAndIncrementSubConnRef(boundKey, cmd)
+	scRef, err := p.getAndIncrementSubConnRef(info.Ctx, boundKey, cmd)
 	if err != nil {
 		return balancer.PickResult{}, err
 	}
@@ -150,19 +150,19 @@ func (p *gcpPicker) detectUnresponsive(ctx context.Context, scRef *subConnRef, c
 	}
 }
 
-func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var scRef *subConnRef
-	var err error
+func (p *gcpPicker) getAndIncrementSubConnRef(ctx context.Context, boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
 	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
-		scRef = p.gb.getSubConnRoundRobin()
+		scRef := p.gb.getSubConnRoundRobin(ctx)
 		if p.log.V(FINEST) {
 			p.log.Infof("picking SubConn for round-robin bind: %p", scRef.subConn)
 		}
-	} else {
-		scRef, err = p.getSubConnRef(boundKey)
+		scRef.streamsIncr()
+		return scRef, nil
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scRef, err := p.getSubConnRef(boundKey)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +174,7 @@ func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.Affi
 
 // getSubConnRef returns the subConnRef object that contains the subconn
 // ready to be used by picker.
+// Must be called holding the picker mutex lock.
 func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	if boundKey != "" {
 		if ref, ok := p.gb.getReadySubConnRef(boundKey); ok {
@@ -184,6 +185,7 @@ func (p *gcpPicker) getSubConnRef(boundKey string) (*subConnRef, error) {
 	return p.getLeastBusySubConnRef()
 }
 
+// Must be called holding the picker mutex lock.
 func (p *gcpPicker) getLeastBusySubConnRef() (*subConnRef, error) {
 	minScRef := p.scRefs[0]
 	minStreamsCnt := minScRef.getStreamsCnt()
