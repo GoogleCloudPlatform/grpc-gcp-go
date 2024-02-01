@@ -206,7 +206,7 @@ type gcpBalancer struct {
 	csEvltr *connectivityStateEvaluator
 	state   connectivity.State
 
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	affinityMap map[string]balancer.SubConn
 	fallbackMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
@@ -384,19 +384,29 @@ func (gb *gcpBalancer) getSubConnRoundRobin(ctx context.Context) *subConnRef {
 	}
 	scRef := gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
 
+	gb.mu.RLock()
+	if state := gb.scStates[scRef.subConn]; state == connectivity.Ready {
+		gb.mu.RUnlock()
+		return scRef
+	} else {
+		grpclog.Infof("grpcgcp.gcpBalancer: scRef is not ready: %v", state)
+	}
+
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+
 	// Wait until SubConn is ready or call context is done.
 	for gb.scStates[scRef.subConn] != connectivity.Ready {
-		grpclog.Infof("grpcgcp.gcpBalancer: scRef is not ready: %v", gb.scStates[scRef.subConn])
-		toCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
+		gb.mu.RUnlock()
 		select {
-		case <-toCtx.Done():
-			if ctx.Err() != nil {
-				return scRef
-			}
+		case <-ctx.Done():
+			return scRef
+		case <-ticker.C:
 		case <-scRef.stateSignal:
 		}
+		gb.mu.RLock()
 	}
+	gb.mu.RUnlock()
 
 	return scRef
 }
