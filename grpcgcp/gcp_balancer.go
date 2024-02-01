@@ -378,21 +378,24 @@ func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
 	return nil, false
 }
 
-func (gb *gcpBalancer) getSubConnRoundRobin() *subConnRef {
+func (gb *gcpBalancer) getSubConnRoundRobin(ctx context.Context) *subConnRef {
 	if len(gb.scRefList) == 0 {
 		gb.newSubConn()
 	}
 	scRef := gb.scRefList[atomic.AddUint32(&gb.rrRefId, 1)%uint32(len(gb.scRefList))]
 
-	// Wait until SubConn is ready.
+	// Wait until SubConn is ready or call context is done.
 	for gb.scStates[scRef.subConn] != connectivity.Ready {
 		grpclog.Infof("grpcgcp.gcpBalancer: scRef is not ready: %v", gb.scStates[scRef.subConn])
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		toCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
 		select {
-		case <-ctx.Done():
+		case <-toCtx.Done():
+			if ctx.Err() != nil {
+				return scRef
+			}
 		case <-scRef.stateSignal:
 		}
-		cancel()
 	}
 
 	return scRef

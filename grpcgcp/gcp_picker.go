@@ -79,7 +79,7 @@ func (p *gcpPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
 		}
 	}
 
-	scRef, err := p.getAndIncrementSubConnRef(boundKey, cmd)
+	scRef, err := p.getAndIncrementSubConnRef(info.Ctx, boundKey, cmd)
 	if err != nil {
 		return balancer.PickResult{}, err
 	}
@@ -150,9 +150,9 @@ func (p *gcpPicker) detectUnresponsive(ctx context.Context, scRef *subConnRef, c
 	}
 }
 
-func (p *gcpPicker) getAndIncrementSubConnRef(boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
+func (p *gcpPicker) getAndIncrementSubConnRef(ctx context.Context, boundKey string, cmd grpc_gcp.AffinityConfig_Command) (*subConnRef, error) {
 	if cmd == grpc_gcp.AffinityConfig_BIND && p.gb.cfg.GetChannelPool().GetBindPickStrategy() == grpc_gcp.ChannelPoolConfig_ROUND_ROBIN {
-		scRef := p.gb.getSubConnRoundRobin()
+		scRef := p.gb.getSubConnRoundRobin(ctx)
 		if p.log.V(FINEST) {
 			p.log.Infof("picking SubConn for round-robin bind: %p", scRef.subConn)
 		}
