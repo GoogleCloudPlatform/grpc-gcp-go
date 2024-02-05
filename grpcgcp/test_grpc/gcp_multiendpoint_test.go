@@ -21,6 +21,7 @@ package test_grpc
 import (
 	"context"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ var (
 )
 
 type faultyConn struct {
-	es       endpointStats
+	es       *endpointStats
 	endpoint string
 	conn     net.Conn
 
@@ -105,13 +106,16 @@ func (f *faultyConn) SetWriteDeadline(t time.Time) error {
 	return f.conn.SetWriteDeadline(t)
 }
 
-type endpointStats map[string]bool
-
-func (es endpointStats) faulty(e string) bool {
-	return es[e] == false
+type endpointStats struct {
+	sync.Map
 }
 
-func (es endpointStats) dialer(ctx context.Context, s string) (net.Conn, error) {
+func (es *endpointStats) faulty(e string) bool {
+	val, _ := es.Load(e)
+	return val == false
+}
+
+func (es *endpointStats) dialer(ctx context.Context, s string) (net.Conn, error) {
 	if es.faulty(s) {
 		return nil, tempErr
 	}
@@ -258,12 +262,11 @@ func TestGCPMultiEndpoint(t *testing.T) {
 	defaultME, followerME := "default", "follower"
 
 	// We start with leader unavailable.
-	eStats := endpointStats{
-		lEndpoint: false,
-		fEndpoint: true,
-		newE:      true,
-		newE2:     true,
-	}
+	eStats := endpointStats{}
+	eStats.Store(lEndpoint, false)
+	eStats.Store(fEndpoint, true)
+	eStats.Store(newE, true)
+	eStats.Store(newE2, true)
 
 	apiCfg := &configpb.ApiConfig{
 		ChannelPool: &configpb.ChannelPoolConfig{
@@ -300,8 +303,9 @@ func TestGCPMultiEndpoint(t *testing.T) {
 		t: t,
 	}
 
-	// First call to the default endpoint will fail because the leader endpoint is unavailable.
-	tc.SayHelloFails(context.Background(), codes.Unavailable)
+	// First call to the default endpoint may fail because the leader endpoint is unavailable
+	// or may fallback to the follower if leader connection status is received before this point.
+	tc.SayHelloWorksOrFailsWith(context.Background(), fEndpoint, codes.Unavailable)
 
 	// But follower-first ME works from the beginning.
 	fCtx := grpcgcp.NewMEContext(context.Background(), followerME)
@@ -311,7 +315,7 @@ func TestGCPMultiEndpoint(t *testing.T) {
 	tc.SayHelloWorks(context.Background(), fEndpoint)
 
 	// Enable the leader endpoint.
-	eStats[lEndpoint] = true
+	eStats.Store(lEndpoint, true)
 	// Give some time to connect. Should work through leader endpoint.
 	tc.SayHelloWorksWithin(context.Background(), lEndpoint, waitTO)
 
@@ -319,13 +323,13 @@ func TestGCPMultiEndpoint(t *testing.T) {
 	tc.SayHelloWorks(fCtx, fEndpoint)
 
 	// Disable follower endpoint.
-	eStats[fEndpoint] = false
+	eStats.Store(fEndpoint, false)
 	// Expect first calls (by number of channels) to follower will fail after that.
 	// Give some time to detect breakage. Make sure follower switched to leader endpoint.
 	tc.SayHelloFailsThenWorks(fCtx, lEndpoint, waitTO, codes.Unavailable)
 
 	// Enable follower endpoint.
-	eStats[fEndpoint] = true
+	eStats.Store(fEndpoint, true)
 	// Give some time to connect/switch. Make sure follower switched back to follower endpoint.
 	tc.SayHelloWorksWithin(fCtx, fEndpoint, waitTO)
 
@@ -451,12 +455,11 @@ func TestGCPMultiEndpointWithDelays(t *testing.T) {
 	defaultME, followerME := "default", "follower"
 
 	// We start with leader unavailable.
-	eStats := endpointStats{
-		lEndpoint: false,
-		fEndpoint: true,
-		newE:      true,
-		newE2:     true,
-	}
+	eStats := endpointStats{}
+	eStats.Store(lEndpoint, false)
+	eStats.Store(fEndpoint, true)
+	eStats.Store(newE, true)
+	eStats.Store(newE2, true)
 
 	apiCfg := &configpb.ApiConfig{
 		ChannelPool: &configpb.ChannelPoolConfig{
@@ -515,7 +518,7 @@ func TestGCPMultiEndpointWithDelays(t *testing.T) {
 	tc.SayHelloWorks(context.Background(), fEndpoint)
 
 	// Enable the leader endpoint.
-	eStats[lEndpoint] = true
+	eStats.Store(lEndpoint, true)
 	// Give some time to connect. Should work through leader endpoint.
 	tc.SayHelloWorksWithin(context.Background(), lEndpoint, 2*time.Second+switchingDelay)
 
@@ -523,13 +526,13 @@ func TestGCPMultiEndpointWithDelays(t *testing.T) {
 	tc.SayHelloWorks(fCtx, fEndpoint)
 
 	// Disable follower endpoint.
-	eStats[fEndpoint] = false
+	eStats.Store(fEndpoint, false)
 	// Expect first calls (by number of channels) to follower will fail after that.
 	// Give some time to detect breakage. Make sure follower switched to leader endpoint.
 	tc.SayHelloFailsThenWorks(fCtx, lEndpoint, waitTO, codes.Unavailable)
 
 	// Enable follower endpoint.
-	eStats[fEndpoint] = true
+	eStats.Store(fEndpoint, true)
 	// Give some time to connect/switch. Make sure follower switched back to follower endpoint.
 	tc.SayHelloWorksWithin(fCtx, fEndpoint, waitTO+recoveryTimeout)
 
