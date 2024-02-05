@@ -111,7 +111,7 @@ func FromMEContext(ctx context.Context) (string, bool) {
 // [GCPMultiEndpoint] implements [grpc.ClientConnInterface] and can be used
 // as a [grpc.ClientConn] when creating gRPC clients.
 type GCPMultiEndpoint struct {
-	sync.Mutex
+	sync.RWMutex
 
 	defaultName string
 	mes         map[string]multiendpoint.MultiEndpoint
@@ -258,9 +258,11 @@ func (sm *monitoredConn) monitor(ctx context.Context) {
 			sm.gme.log.Infof("%q endpoint state changed to %v", sm.endpoint, currentState)
 		}
 		// Inform all multiendpoints.
+		sm.gme.RLock()
 		for _, me := range sm.gme.mes {
 			me.SetEndpointAvailability(sm.endpoint, currentState == connectivity.Ready)
 		}
+		sm.gme.RUnlock()
 	}
 }
 

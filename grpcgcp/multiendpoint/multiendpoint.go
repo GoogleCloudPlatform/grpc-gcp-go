@@ -121,7 +121,7 @@ func NewMultiEndpoint(b *MultiEndpointOptions) (MultiEndpoint, error) {
 }
 
 type multiEndpoint struct {
-	sync.Mutex
+	sync.RWMutex
 
 	endpoints       map[string]*endpoint
 	recoveryTimeout time.Duration
@@ -132,6 +132,8 @@ type multiEndpoint struct {
 
 // Current returns current endpoint.
 func (me *multiEndpoint) Current() string {
+	me.RLock()
+	defer me.RUnlock()
 	return me.current
 }
 

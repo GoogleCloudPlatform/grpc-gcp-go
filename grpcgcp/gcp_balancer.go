@@ -397,12 +397,13 @@ func (gb *gcpBalancer) getSubConnRoundRobin(ctx context.Context) *subConnRef {
 
 	// Wait until SubConn is ready or call context is done.
 	for gb.scStates[scRef.subConn] != connectivity.Ready {
+		sigChan := scRef.stateSignal
 		gb.mu.RUnlock()
 		select {
 		case <-ctx.Done():
 			return scRef
 		case <-ticker.C:
-		case <-scRef.stateSignal:
+		case <-sigChan:
 		}
 		gb.mu.RLock()
 	}
