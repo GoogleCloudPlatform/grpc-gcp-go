@@ -163,6 +163,12 @@ func (gme *GCPMultiEndpoint) GCPConfig() *pb.ApiConfig {
 	return proto.Clone(gme.gcpConfig).(*pb.ApiConfig)
 }
 
+func (gme *GCPMultiEndpoint) String() string {
+	return fmt.Sprintf(
+		"defaultName: %q mes: %v pools: %v, opts: %v gcpConfig: %v dialFunc: %p, log: %p, Mutex: %p",
+		gme.defaultName, gme.mes, gme.pools, gme.opts, gme.gcpConfig, &gme.dialFunc, &gme.log, &gme.RWMutex)
+}
+
 // GCPMultiEndpointOptions holds options to construct a MultiEndpoints-enabled gRPC client
 // connection.
 type GCPMultiEndpointOptions struct {
