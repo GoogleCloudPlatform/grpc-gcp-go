@@ -218,6 +218,13 @@ func NewGCPMultiEndpoint(meOpts *GCPMultiEndpointOptions, opts ...grpc.DialOptio
 	}
 	if gme.dialFunc == nil {
 		gme.dialFunc = func(_ context.Context, target string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+			if gme.log.V(FINEST) {
+				oString := ""
+				for _, dopt := range opts {
+					oString = fmt.Sprintf("%v, %+v", oString, dopt)
+				}
+				gme.log.Infof("GCPMultiEndpoint dialing %q with default dialFunc with options: [%v]", target, oString)
+			}
 			return grpc.Dial(target, opts...)
 		}
 	}
