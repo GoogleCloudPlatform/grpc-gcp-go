@@ -182,6 +182,12 @@ type GCPMultiEndpointOptions struct {
 	DialFunc func(ctx context.Context, target string, dopts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
+func (o *GCPMultiEndpointOptions) String() string {
+	return fmt.Sprintf(
+		"Default: %q GRPCgcpConfig: %q MultiEndpoints: %v DialFunc: %p",
+		o.Default, o.GRPCgcpConfig, o.MultiEndpoints, &o.DialFunc)
+}
+
 // NewGCPMultiEndpoint creates new [GCPMultiEndpoint] -- MultiEndpoints-enabled gRPC client
 // connection.
 //
