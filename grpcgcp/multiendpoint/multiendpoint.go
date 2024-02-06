@@ -101,6 +101,12 @@ type MultiEndpointOptions struct {
 	SwitchingDelay time.Duration
 }
 
+func (o *MultiEndpointOptions) String() string {
+	return fmt.Sprintf(
+		"Endpoints: %v RecoveryTimeout: %v SwitchingDelay %v",
+		o.Endpoints, o.RecoveryTimeout, o.SwitchingDelay)
+}
+
 // NewMultiEndpoint validates options and creates a new [MultiEndpoint].
 func NewMultiEndpoint(b *MultiEndpointOptions) (MultiEndpoint, error) {
 	if len(b.Endpoints) == 0 {
