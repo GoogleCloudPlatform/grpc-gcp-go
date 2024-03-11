@@ -250,24 +250,30 @@ func newMonitoredConn(endpoint string, conn *grpc.ClientConn, gme *GCPMultiEndpo
 	return
 }
 
-func (sm *monitoredConn) monitor(ctx context.Context) {
-	currentState := sm.conn.GetState()
-	for sm.conn.WaitForStateChange(ctx, currentState) {
-		currentState = sm.conn.GetState()
-		if sm.gme.log.V(FINE) {
-			sm.gme.log.Infof("%q endpoint state changed to %v", sm.endpoint, currentState)
+func (mc *monitoredConn) notify(state connectivity.State) {
+	if mc.gme.log.V(FINE) {
+		mc.gme.log.Infof("%q endpoint state changed to %v", mc.endpoint, state)
+	}
+	// Inform all multiendpoints.
+	mc.gme.RLock()
+	for _, me := range mc.gme.mes {
+		me.SetEndpointAvailability(mc.endpoint, state == connectivity.Ready)
+	}
+	mc.gme.RUnlock()
+}
+
+func (mc *monitoredConn) monitor(ctx context.Context) {
+	for {
+		currentState := mc.conn.GetState()
+		mc.notify(currentState)
+		if !mc.conn.WaitForStateChange(ctx, currentState) {
+			break
 		}
-		// Inform all multiendpoints.
-		sm.gme.RLock()
-		for _, me := range sm.gme.mes {
-			me.SetEndpointAvailability(sm.endpoint, currentState == connectivity.Ready)
-		}
-		sm.gme.RUnlock()
 	}
 }
 
-func (sm *monitoredConn) stopMonitoring() {
-	sm.cancel()
+func (mc *monitoredConn) stopMonitoring() {
+	mc.cancel()
 }
 
 // UpdateMultiEndpoints reconfigures MultiEndpoints.
