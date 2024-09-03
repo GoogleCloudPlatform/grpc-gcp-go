@@ -76,6 +76,15 @@ func GCPStreamClientInterceptor(
 		streamer: streamer,
 		opts:     opts,
 	}
+	cs.Lock()
+	realCS, err := cs.streamer(ctx, cs.desc, cs.cc, cs.method, cs.opts...)
+	if err != nil {
+		cs.initStreamErr = err
+		cs.Unlock()
+		return cs, nil
+	}
+	cs.ClientStream = realCS
+	cs.Unlock()
 	cs.cond = sync.NewCond(cs)
 	return cs, nil
 }
