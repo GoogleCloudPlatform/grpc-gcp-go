@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 
-option go_package = "./grpc_gcp";
+option go_package = "github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/grpc_gcp";
 
 package grpc.gcp;
 
