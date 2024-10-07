@@ -486,7 +486,8 @@ func TestRefreshingSubConnsDoesNotAffectConnState(t *testing.T) {
 	time.Sleep(time.Millisecond * 110)
 
 	addCall := func() {
-		ctx, _ := context.WithTimeout(context.TODO(), 0)
+		ctx, cancel := context.WithTimeout(context.TODO(), 0)
+		defer cancel()
 		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
 		if err != nil {
 			t.Fatalf("gcpPicker.Pick returns error %v, want: nil", err)
@@ -580,7 +581,8 @@ func TestShutdownWhileRefreshing(t *testing.T) {
 	time.Sleep(time.Millisecond * 110)
 
 	addCall := func() {
-		ctx, _ := context.WithTimeout(context.TODO(), 0)
+		ctx, cancel := context.WithTimeout(context.TODO(), 0)
+		defer cancel()
 		pr, err := b.picker.Pick(balancer.PickInfo{FullMethodName: "", Ctx: ctx})
 		if err != nil {
 			t.Fatalf("gcpPicker.Pick returns error %v, want: nil", err)
