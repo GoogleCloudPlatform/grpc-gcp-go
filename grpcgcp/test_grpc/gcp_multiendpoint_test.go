@@ -312,7 +312,7 @@ func TestGCPMultiEndpoint(t *testing.T) {
 	tc.SayHelloWorks(fCtx, fEndpoint)
 
 	// Make sure default switched to follower in a few moments.
-	tc.SayHelloWorks(context.Background(), fEndpoint)
+	tc.SayHelloWorksWithin(context.Background(), fEndpoint, waitTO)
 
 	// Enable the leader endpoint.
 	eStats.Store(lEndpoint, true)

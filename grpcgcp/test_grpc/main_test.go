@@ -97,6 +97,18 @@ func setup() error {
 			log.Fatalf("failed to serve: %v", err)
 		}
 	}()
+	// Make sure the server is serving.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%d", port), grpc.WithInsecure())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	c := pb.NewGreeterClient(conn)
+	if _, err := c.SayHello(ctx, &pb.HelloRequest{Name: "world"}); err != nil {
+		return err
+	}
 	fmt.Println("Setup ended.")
 	return nil
 }
