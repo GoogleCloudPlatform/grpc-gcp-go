@@ -162,6 +162,18 @@ func (mr *MockSubConnMockRecorder) GetOrBuildProducer(arg0 interface{}) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrBuildProducer", reflect.TypeOf((*MockSubConn)(nil).GetOrBuildProducer), arg0)
 }
 
+// Shutdown mocks base method.
+func (m *MockSubConn) Shutdown() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Shutdown")
+}
+
+// Shutdown indicates an expected call of Shutdown.
+func (mr *MockSubConnMockRecorder) Shutdown() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Shutdown", reflect.TypeOf((*MockSubConn)(nil).Shutdown))
+}
+
 // UpdateAddresses mocks base method.
 func (m *MockSubConn) UpdateAddresses(arg0 []resolver.Address) {
 	m.ctrl.T.Helper()
