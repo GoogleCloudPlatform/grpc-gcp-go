@@ -114,6 +114,9 @@ func (mr *MockClientConnMockRecorder) UpdateState(arg0 interface{}) *gomock.Call
 
 // MockSubConn is a mock of SubConn interface.
 type MockSubConn struct {
+	// The SubConn interface is added by a manual edit to 
+	// comply with the requirements in the SubConn interface
+	// doc comment.
 	balancer.SubConn
 	ctrl     *gomock.Controller
 	recorder *MockSubConnMockRecorder
