@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: client-go
+  name: client-go
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client-go
+  template:
+    metadata:
+      labels:
+        app: client-go
+    spec:
+      containers:
+      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go"
+        imagePullPolicy: Always
+        name: client-go
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "1024Mi"
