@@ -14,6 +14,10 @@ import (
 
 // MockClientConn is a mock of ClientConn interface.
 type MockClientConn struct {
+	// The ClientConn interface below is embedded by a manual edit to comply 
+	// with grpc's requirement to embed an existing ClientConn to allow grpc to
+	// add new methods to the interface easily.
+	balancer.ClientConn
 	ctrl     *gomock.Controller
 	recorder *MockClientConnMockRecorder
 }
