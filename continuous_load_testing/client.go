@@ -1,8 +1,29 @@
-//go:generate mkdir -p proto
-//go:generate protoc --proto_path=../third_party/grpc-proto --go_out=proto --go_opt=Mgrpc/testing/empty.proto=grpc.io/grpc-proto/grpc/testing/empty --go_opt=Mgrpc/testing/messages.proto=grpc.io/grpc-proto/grpc/testing/messages --go_opt=Mgrpc/testing/test.proto=grpc.io/grpc-proto/grpc/testing/test grpc/testing/empty.proto grpc/testing/messages.proto grpc/testing/test.proto
-
+//go:generate sh grpc-proto-gen.sh
 package main
 
-func main() {
+import (
+	"context"
+	"flag"
+	"log"
 
+	empty "continuous_load_testing/proto/grpc/testing/empty"
+	test "continuous_load_testing/proto/grpc/testing/test"
+	"google.golang.org/grpc"
+)
+
+var backend = "google-c2p:///directpathgrpctesting-pa.googleapis.com"
+
+func main() {
+	flag.Parse()
+	conn, err := grpc.NewClient(backend)
+	if err != nil {
+		log.Fatalf("failed to connect: %v", backend)
+	}
+	defer conn.Close()
+	client := test.NewTestServiceClient(conn)
+	ctx := context.Background()
+	_, err = client.EmptyCall(ctx, &empty.Empty{})
+	if err != nil {
+		log.Fatalf("EmptyCall failed")
+	}
 }
