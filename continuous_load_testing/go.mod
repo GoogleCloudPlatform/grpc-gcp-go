@@ -1,6 +1,6 @@
 module continuous_load_testing
 
-go 1.24
+go 1.23
 
 require google.golang.org/grpc v1.69.2
 
