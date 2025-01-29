@@ -66,7 +66,7 @@ func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter
 }
 
 // newGRPCLoadTestMonitoredResource initializes a new resource for the gRPC load test client.
-func newGRPCLoadTestMonitoredResource(ctx context.Context, opts ...resource.Option) (*grpcGCPClientContinuousLoadTestResource, error) {
+func newGrpcLoadTestMonitoredResource(ctx context.Context, opts ...resource.Option) (*grpcGCPClientContinuousLoadTestResource, error) {
 	_, err := resource.New(ctx, opts...)
 	gclr := &grpcGCPClientContinuousLoadTestResource{}
 	gclr.resource, err = resource.New(ctx, resource.WithAttributes([]attribute.KeyValue{
@@ -82,7 +82,7 @@ func newGRPCLoadTestMonitoredResource(ctx context.Context, opts ...resource.Opti
 func setupOpenTelemetry() ([]grpc.DialOption, error) {
 	ctx := context.Background()
 	var exporter metric.Exporter
-	gclr, err := newGRPCLoadTestMonitoredResource(ctx)
+	gclr, err := newGrpcLoadTestMonitoredResource(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create monitored resource: %v", err)
 	}
