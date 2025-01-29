@@ -9,18 +9,28 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"continuous_load_testing/proto/grpc/testing/empty"
 	"continuous_load_testing/proto/grpc/testing/messages"
 	"continuous_load_testing/proto/grpc/testing/test"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"google.golang.org/grpc/experimental/stats"
+	"google.golang.org/grpc/stats/opentelemetry"
+
+	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/alts"
 	"google.golang.org/grpc/credentials/google"
-	"google.golang.org/protobuf/proto"
+)
+
+const (
+	monitoredResourceName = "k8s_container"
+	metricPrefix          = "directpathgrpctesting-pa.googleapis.com/client"
+	project               = "your-project-id" //do we need this?
 )
 
 var (
@@ -37,28 +47,92 @@ var (
 		"FullDuplexCall":      false,
 		"HalfDuplexCall":      false,
 	}
-	Metrics = []string{
-		"grpc.lb.wrr.rr_fallback",
-		"grpc.lb.wrr.endpoint_weight_not_yet_usable",
-		"grpc.lb.wrr.endpoint_weight_stale",
-		"grpc.lb.wrr.endpoint_weights",
-		"grpc.lb.rls.cache_entries",
-		"grpc.lb.rls.cache_size",
-		"grpc.lb.rls.default_target_picks",
-		"grpc.lb.rls.target_picks",
-		"grpc.lb.rls.failed_picks",
-		"grpc.xds_client.connected",
-		"grpc.xds_client.server_failure",
-		"grpc.xds_client.resource_updates_valid",
-		"grpc.xds_client.resource_updates_invalid",
-		"grpc.xds_client.resources",
-		"grpc.client.attempt.sent_total_compressed_message_size",
-		"grpc.client.attempt.rcvd_total_compressed_message_size",
-		"grpc.client.attempt.started",
-		"grpc.client.attempt.duration",
-		"grpc.client.call.duration",
-	}
 )
+
+type grpcGCPClientContinuousLoadTestResource struct {
+	project  string
+	resource *resource.Resource
+}
+
+func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter, error) {
+	exporter, err := mexporter.New(
+		mexporter.WithProjectID(gclr.project),
+		mexporter.WithMetricDescriptorTypeFormatter(metricFormatter),
+		mexporter.WithCreateServiceTimeSeries(),
+		mexporter.WithMonitoredResourceDescription(monitoredResourceName, []string{"project_id", "location"}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating metrics exporter: %w", err)
+	}
+	return exporter, nil
+}
+
+// newGRPCLoadTestMonitoredResource initializes a new resource for the gRPC load test client.
+func newGRPCLoadTestMonitoredResource(ctx context.Context, project string, opts ...resource.Option) (*grpcGCPClientContinuousLoadTestResource, error) {
+	_, err := resource.New(ctx, opts...)
+	gclr := &grpcGCPClientContinuousLoadTestResource{project: project}
+	gclr.resource, err = resource.New(ctx, resource.WithAttributes([]attribute.KeyValue{
+		{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
+		{Key: "project_id", Value: attribute.StringValue(gclr.project)},
+	}...))
+	if err != nil {
+		return nil, err
+	}
+	return gclr, nil
+}
+
+// setupOpenTelemetry sets up OpenTelemetry for the gRPC load test client, initializing the exporter and provider.
+func setupOpenTelemetry() ([]grpc.DialOption, error) {
+	ctx := context.Background()
+	var exporter metric.Exporter
+	gclr, err := newGRPCLoadTestMonitoredResource(ctx, project)
+	if err != nil {
+		log.Fatalf("Failed to create monitored resource: %v", err)
+	}
+	exporter, err = gclr.exporter()
+	if err != nil {
+		log.Fatalf("Failed to create exporter: %v", err)
+	}
+	meterOpts := []metric.Option{
+		metric.WithResource(gclr.resource),
+		metric.WithReader(metric.NewPeriodicReader(exporter, metric.WithInterval(20*time.Second))),
+	}
+	provider := metric.NewMeterProvider(meterOpts...)
+	mo := opentelemetry.MetricsOptions{
+		MeterProvider: provider,
+		Metrics: stats.NewMetrics(
+			"grpc.lb.wrr.rr_fallback",
+			"grpc.lb.wrr.endpoint_weight_not_yet_usable",
+			"grpc.lb.wrr.endpoint_weight_stale",
+			"grpc.lb.wrr.endpoint_weights",
+			"grpc.lb.rls.cache_entries",
+			"grpc.lb.rls.cache_size",
+			"grpc.lb.rls.default_target_picks",
+			"grpc.lb.rls.target_picks",
+			"grpc.lb.rls.failed_picks",
+			"grpc.xds_client.connected",
+			"grpc.xds_client.server_failure",
+			"grpc.xds_client.resource_updates_valid",
+			"grpc.xds_client.resource_updates_invalid",
+			"grpc.xds_client.resources",
+			"grpc.client.attempt.sent_total_compressed_message_size",
+			"grpc.client.attempt.rcvd_total_compressed_message_size",
+			"grpc.client.attempt.started",
+			"grpc.client.attempt.duration",
+			"grpc.client.call.duration",
+		),
+		OptionalLabels: []string{"grpc.lb.locality"},
+	}
+	opts := []grpc.DialOption{
+		opentelemetry.DialOption(opentelemetry.Options{MetricsOptions: mo}),
+		grpc.WithDefaultCallOptions(grpc.StaticMethodCallOption{}),
+	}
+	return opts, nil
+}
+
+func metricFormatter(m metricdata.Metrics) string {
+	return metricPrefix + strings.ReplaceAll(string(m.Name), ".", "/")
+}
 
 func main() {
 	log.Println("DirectPath Continuous Load Testing Client Started.")
@@ -73,17 +147,18 @@ func main() {
 			methods[method] = true
 		}
 	}
-	setupOpenTelemetry()
-	var opts []grpc.DialOption
+	opts, err := setupOpenTelemetry()
+	if err != nil {
+		log.Fatalf("Failed to set up OpenTelemetry: %v", err)
+	}
 	altsOpts := alts.DefaultClientOptions()
 	altsTC := alts.NewClientCreds(altsOpts)
-	opts = append(opts, grpc.WithTransportCredentials(altsTC), grpc.WithCredentialsBundle(google.NewDefaultCredentials()), grpc.WithStatsHandler(otelgrpc.NewClientStatsHandler()))
+	opts = append(opts, grpc.WithTransportCredentials(altsTC), grpc.WithCredentialsBundle(google.NewDefaultCredentials()))
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server %v", err)
 	}
 	defer conn.Close()
-	// Create the TestService client
 	stub := test.NewTestServiceClient(conn)
 	var wg sync.WaitGroup
 	for i := 0; i < *concurrency; i++ {
@@ -118,23 +193,6 @@ func main() {
 	}
 	wg.Wait()
 	log.Println("All test cases completed.")
-}
-
-// TODO:Double check this function
-func setupOpenTelemetry() {
-	exporter, err := prometheus.New()
-	if err != nil {
-		log.Fatalf("failed to create Prometheus exporter: %v", err)
-	}
-	// Create a MeterProvider with Prometheus exporter
-	meterProvider := metric.NewMeterProvider(metric.WithReader(exporter))
-	otel.SetMeterProvider(meterProvider)
-	// Set up TracerProvider with a simple batch processor
-	tp := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
-	)
-	otel.SetTracerProvider(tp)
-	log.Println("OpenTelemetry setup complete")
 }
 
 // executeMethod executes the RPC call for a specific method with concurrency.
