@@ -139,11 +139,13 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 		go func(i int) {
 			defer wg.Done()
 			ctx := context.Background()
-			err := methodFunc(ctx, stub)
-			if err != nil {
-				log.Printf("Error executing %s #%d: %v", methodName, i, err)
-			} else {
-				log.Printf("%s #%d done", methodName, i)
+			for {
+				err := methodFunc(ctx, stub)
+				if err != nil {
+					log.Printf("Error executing %s #%d: %v", methodName, i, err)
+				} else {
+					log.Printf("%s #%d done", methodName, i)
+				}
 			}
 		}(i)
 	}
