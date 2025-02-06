@@ -24,8 +24,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/alts"
 	"google.golang.org/grpc/credentials/google"
+	_ "google.golang.org/grpc/balancer/grpclb"      // Register the grpclb load balancing policy.
+	_ "google.golang.org/grpc/balancer/rls"         // Register the RLS load balancing policy.
+	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS resolver required for c2p directpath.
 )
 
 const (
@@ -139,6 +141,7 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 		go func(i int) {
 			defer wg.Done()
 			ctx := context.Background()
+			time.Sleep(1000 * time.Millisecond)
 			for {
 				err := methodFunc(ctx, stub)
 				if err != nil {
@@ -301,9 +304,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to set up OpenTelemetry: %v", err)
 	}
-	altsOpts := alts.DefaultClientOptions()
+
+/* 	altsOpts := alts.DefaultClientOptions()
 	altsTC := alts.NewClientCreds(altsOpts)
-	opts = append(opts, grpc.WithTransportCredentials(altsTC))
+	opts = append(opts, grpc.WithTransportCredentials(altsTC)) */
+
+opts = append(opts, grpc.WithCredentialsBundle(google.NewDefaultCredentials()))
+/* 	opts = append(opts, grpc.WithCredentialsBundle(google.NewComputeEngineCredentials())) */
+
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server %v", err)
