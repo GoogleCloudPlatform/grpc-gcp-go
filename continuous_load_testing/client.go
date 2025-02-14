@@ -89,8 +89,6 @@ func newGrpcLoadTestMonitoredResource(ctx context.Context, opts ...resource.Opti
 		location:       "us-west1",
 		cluster_name:   "cluster-1",
 	}
-	// 	s := detectedAttrs.Set()
-	// Add resource attributes using the dynamically fetched metadata
 	gclr.resource, err = resource.New(ctx, resource.WithAttributes([]attribute.KeyValue{
 		{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
 		{Key: "project_id", Value: attribute.StringValue(gclr.project_id)},
@@ -125,7 +123,7 @@ func setupOpenTelemetry() ([]grpc.DialOption, error) {
 	log.Println("Created exporter.")
 	meterOpts := []metric.Option{
 		metric.WithResource(gclr.resource),
-		metric.WithReader(metric.NewPeriodicReader(exporter, metric.WithInterval(20*time.Second))),
+		metric.WithReader(metric.NewPeriodicReader(exporter, metric.WithInterval(90*time.Second))),
 	}
 	provider := metric.NewMeterProvider(meterOpts...)
 	log.Println("provider done.")
@@ -371,6 +369,7 @@ func main() {
 			log.Printf("Starting goroutine #%d", i)
 			if methods["EmptyCall"] {
 				executeMethod("EmptyCall", ExecuteEmptyCalls, stub)
+				log.Printf("EmptyCall #%d done", i)
 			}
 			if methods["UnaryCall"] {
 				executeMethod("UnaryCall", ExecuteUnaryCalls, stub)
