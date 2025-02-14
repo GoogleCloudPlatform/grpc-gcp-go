@@ -189,6 +189,7 @@ func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
 	if err != nil {
 		return fmt.Errorf("EmptyCall RPC failed: %v", err)
 	}
+	log.Println("EmptyCall completed successfully.")
 	return nil
 }
 
@@ -337,7 +338,7 @@ func main() {
 			log.Printf("Enabled method: %s", method)
 		}
 	} else {
-		methods["HalfDuplexCall"] = true
+		methods["EmptyCall"] = true
 		log.Println("No methods input received.default EmptyCall")
 	}
 	log.Println("Setting up OpenTelemetry...")
