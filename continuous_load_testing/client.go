@@ -37,7 +37,7 @@ const (
 
 var (
 	serverAddr    = "google-c2p:///directpathgrpctesting-pa.googleapis.com"
-	concurrency   = flag.Int("concurrency", 2, "Number of concurrent workers (default 1)")
+	concurrency   = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
 	numOfRequests = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
 	methodsInput  = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 
@@ -152,7 +152,6 @@ func setupOpenTelemetry() ([]grpc.DialOption, error) {
 		),
 		OptionalLabels: []string{"grpc.lb.locality"},
 	}
-	log.Println("mo done")
 	opts := []grpc.DialOption{
 		opentelemetry.DialOption(opentelemetry.Options{MetricsOptions: mo}),
 		grpc.WithDefaultCallOptions(grpc.StaticMethodCallOption{}),
@@ -172,7 +171,6 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 		go func(i int) {
 			defer wg.Done()
 			ctx := context.Background()
-			time.Sleep(1000 * time.Millisecond)
 			for {
 				err := methodFunc(ctx, stub)
 				if err != nil {
@@ -189,7 +187,6 @@ func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
 	if err != nil {
 		return fmt.Errorf("EmptyCall RPC failed: %v", err)
 	}
-	log.Println("EmptyCall completed successfully.")
 	return nil
 }
 
@@ -214,7 +211,6 @@ func ExecuteStreamingInputCalls(ctx context.Context, tc test.TestServiceClient) 
 		return fmt.Errorf("%v.StreamingInputCall(_) = _, %v", tc, err)
 	}
 	for i := 0; i < *numOfRequests; i++ {
-		log.Printf("num_of_requests: %d", i)
 		req := &messages.StreamingInputCallRequest{}
 		if err := stream.Send(req); err != nil {
 			return fmt.Errorf("%v has error %v while sending %v", stream, err, req)
@@ -250,7 +246,6 @@ func ExecuteStreamingOutputCalls(ctx context.Context, tc test.TestServiceClient)
 			return fmt.Errorf("got the reply of type %d, want %d", t, messages.PayloadType_COMPRESSABLE)
 		}
 		index++
-		log.Printf("Received response #%d, Payload type: %s", index, t)
 	}
 	if rpcStatus != io.EOF {
 		return fmt.Errorf("failed to finish the server streaming rpc: %v", rpcStatus)
@@ -264,7 +259,6 @@ func ExecuteFullDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 		return fmt.Errorf("%v.FullDuplexCall(_) = _, %v", tc, err)
 	}
 	for i := 0; i < *numOfRequests; i++ {
-		log.Printf("num_of_requests: %d", i)
 		req := &messages.StreamingOutputCallRequest{
 			ResponseType: messages.PayloadType_COMPRESSABLE,
 		}
@@ -295,7 +289,6 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 		return fmt.Errorf("%v.HalfDuplexCall(_) = _, %v", tc, err)
 	}
 	for i := 0; i < *numOfRequests; i++ {
-		log.Printf("num_of_requests: %d", i)
 		req := &messages.StreamingOutputCallRequest{
 			ResponseType: messages.PayloadType_COMPRESSABLE,
 		}
@@ -324,7 +317,6 @@ func main() {
 	log.Println("DirectPath Continuous Load Testing Client Started.")
 	log.Println("start to parse.")
 	flag.Parse()
-	log.Printf("Methods input from flag: %s", *methodsInput)
 	if *methodsInput != "" {
 		log.Printf("Methods input received: %s", *methodsInput)
 		methodList := strings.Split(*methodsInput, ",")
@@ -352,8 +344,10 @@ func main() {
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	log.Println("Connection attempt made.")
 	if err != nil {
+		log.Printf("Failed to connect to gRPC server %v with error: %v", serverAddr, err)
 		log.Fatalf("Failed to connect to gRPC server %v", err)
 	}
+	log.Println("Successfully connected to gRPC server")
 	defer conn.Close()
 	stub := test.NewTestServiceClient(conn)
 	log.Println("gRPC client stub created.")
