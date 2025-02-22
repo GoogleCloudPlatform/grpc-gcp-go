@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,6 @@ import (
 
 	"continuous_load_testing/proto/grpc/testing/messages"
 	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
-	"go.opentelemetry.io/contrib/detectors/gcp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -52,17 +52,21 @@ var (
 )
 
 type grpcGCPClientContinuousLoadTestResource struct {
-	location     string
-	cluster_name string
-	resource     *resource.Resource
+	project_id     string
+	location       string
+	cluster_name   string
+	namespace_name string
+	pod_name       string
+	container_name string
+	resource       *resource.Resource
 }
-
 
 func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter, error) {
 	exporter, err := mexporter.New(
+		mexporter.WithProjectID(gclr.project_id),
 		mexporter.WithMetricDescriptorTypeFormatter(metricFormatter),
 		mexporter.WithCreateServiceTimeSeries(),
-		mexporter.WithMonitoredResourceDescription(monitoredResourceName, []string{"location", "cluster_name"}),
+		mexporter.WithMonitoredResourceDescription(monitoredResourceName, []string{"project_id", "location", "cluster_name", "namespace_name", "pod_name", "container_name"}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating metrics exporter: %w", err)
@@ -77,21 +81,31 @@ func newGrpcLoadTestMonitoredResource(ctx context.Context, opts ...resource.Opti
 	if err != nil {
 		return nil, err
 	}
-
 	gclr := &grpcGCPClientContinuousLoadTestResource{
-		location:     "us-west1",
-		cluster_name: "cluster-1",
+		pod_name:       getEnv("POD_NAME", ""),
+		namespace_name: getEnv("NAMESPACE_NAME", ""),
+		container_name: getEnv("CONTAINER_NAME", ""),
+		project_id:     "directpathgrpctesting-client",
+		location:       "us-west1",
+		cluster_name:   "cluster-1",
 	}
-	gclr.resource, err = resource.New(ctx,
-		resource.WithDetectors(gcp.NewDetector()),
-		resource.WithTelemetrySDK(),
-		resource.WithFromEnv(),
-		resource.WithAttributes([]attribute.KeyValue{
-			{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
-			{Key: "location", Value: attribute.StringValue(gclr.location)},
-			{Key: "cluster_name", Value: attribute.StringValue(gclr.cluster_name)},
-		}...))
+	gclr.resource, err = resource.New(ctx, resource.WithAttributes([]attribute.KeyValue{
+		{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
+		{Key: "project_id", Value: attribute.StringValue(gclr.project_id)},
+		{Key: "location", Value: attribute.StringValue(gclr.location)},
+		{Key: "cluster_name", Value: attribute.StringValue(gclr.cluster_name)},
+		{Key: "namespace_name", Value: attribute.StringValue(gclr.namespace_name)},
+		{Key: "pod_name", Value: attribute.StringValue(gclr.pod_name)},
+		{Key: "container_name", Value: attribute.StringValue(gclr.container_name)},
+	}...))
 	return gclr, nil
+}
+
+func getEnv(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
 }
 
 // setupOpenTelemetry sets up OpenTelemetry for the gRPC load test client, initializing the exporter and provider.
