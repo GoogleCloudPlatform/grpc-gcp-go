@@ -152,7 +152,6 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 			}
 		}(i)
 	}
-	wg.Wait()
 }
 
 func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
@@ -167,7 +166,7 @@ func ExecuteUnaryCalls(ctx context.Context, tc test.TestServiceClient) error {
 	req := &messages.SimpleRequest{}
 	_, err := tc.UnaryCall(ctx, req)
 	if err != nil {
-		return fmt.Errorf("UnaryCall RPC failed: ", err)
+		return fmt.Errorf("UnaryCall RPC failed: %v", err)
 	}
 	return nil
 }
@@ -300,34 +299,31 @@ func main() {
 	defer conn.Close()
 	stub := test.NewTestServiceClient(conn)
 	log.Println("gRPC client stub created.")
-
-	var wg sync.WaitGroup
-	for i := 0; i < numOfMethods; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			log.Printf("numOfMethods #%d", numOfMethods)
-			log.Printf("Starting method goroutine #%d", i)
-			if methods["EmptyCall"] {
-				executeMethod("EmptyCall", ExecuteEmptyCalls, stub)
-			}
-			if methods["UnaryCall"] {
-				executeMethod("UnaryCall", ExecuteUnaryCalls, stub)
-			}
-			if methods["StreamingInputCall"] {
-				executeMethod("StreamingInputCall", ExecuteStreamingInputCalls, stub)
-			}
-			if methods["StreamingOutputCall"] {
-				executeMethod("StreamingOutputCall", ExecuteStreamingOutputCalls, stub)
-			}
-			if methods["FullDuplexCall"] {
-				executeMethod("FullDuplexCall", ExecuteFullDuplexCalls, stub)
-			}
-			if methods["HalfDuplexCall"] {
-				executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
-			}
-		}(i)
+	if methods["EmptyCall"] {
+		go executeMethod("EmptyCall", ExecuteEmptyCalls, stub)
+		log.Println("EmptyCall method started in background")
 	}
-	wg.Wait()
+	if methods["UnaryCall"] {
+		go executeMethod("UnaryCall", ExecuteUnaryCalls, stub)
+		log.Println("UnaryCall method started in background")
+	}
+	if methods["StreamingInputCall"] {
+		go executeMethod("StreamingInputCall", ExecuteStreamingInputCalls, stub)
+		log.Println("StreamingInputCall method started in background")
+	}
+	if methods["StreamingOutputCall"] {
+		go executeMethod("StreamingOutputCall", ExecuteStreamingOutputCalls, stub)
+		log.Println("StreamingOutputCall method started in background")
+	}
+	if methods["FullDuplexCall"] {
+		go executeMethod("FullDuplexCall", ExecuteFullDuplexCalls, stub)
+		log.Println("FullDuplexCall method started in background")
+	}
+	if methods["HalfDuplexCall"] {
+		go executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
+		log.Println("HalfDuplexCall method started in background")
+	}
+	forever := make(chan struct{})
+	<-forever
 	log.Println("All test cases completed.")
 }
