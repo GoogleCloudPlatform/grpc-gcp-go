@@ -40,7 +40,6 @@ var (
 	concurrency   = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
 	numOfRequests = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
 	methodsInput  = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
-	numOfMethods  = 0
 	methods       = map[string]bool{
 		"EmptyCall":           false,
 		"UnaryCall":           false,
@@ -276,7 +275,6 @@ func main() {
 				log.Fatalf("Invalid method specified: %s. Available methods are: EmptyCall, UnaryCall, StreamingInputCall, StreamingOutputCall, FullDuplexCall, HalfDuplexCall", method)
 			}
 			methods[method] = true
-			numOfMethods += 1
 			log.Printf("Enabled method: %s", method)
 		}
 	} else {
