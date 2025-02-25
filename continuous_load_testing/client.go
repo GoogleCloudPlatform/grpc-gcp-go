@@ -37,7 +37,7 @@ const (
 
 var (
 	serverAddr    = "google-c2p:///directpathgrpctesting-pa.googleapis.com"
-	concurrency   = flag.Int("concurrency", 3, "Number of concurrent workers (default 1)")
+	concurrency   = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
 	numOfRequests = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
 	methodsInput  = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	numOfMethods  = 0
@@ -51,11 +51,7 @@ var (
 	}
 )
 
-type grpcGCPClientContinuousLoadTestResource struct {
-	resource *resource.Resource
-}
-
-func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter, error) {
+func createExporter() (metric.Exporter, error) {
 	exporter, err := mexporter.New(
 		mexporter.WithMetricDescriptorTypeFormatter(metricFormatter),
 		mexporter.WithCreateServiceTimeSeries(),
@@ -68,37 +64,36 @@ func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter
 }
 
 // newGRPCLoadTestMonitoredResource initializes a new resource for the gRPC load test client.
-func newGrpcLoadTestMonitoredResource(ctx context.Context, opts ...resource.Option) (*grpcGCPClientContinuousLoadTestResource, error) {
-	_, err := resource.New(ctx, opts...)
-	if err != nil {
-		return nil, err
-	}
-	gclr := &grpcGCPClientContinuousLoadTestResource{}
-	gclr.resource, err = resource.New(ctx,
+func newGrpcLoadTestMonitoredResource(ctx context.Context) (*resource.Resource, error) {
+	res, err := resource.New(ctx,
 		resource.WithDetectors(gcp.NewDetector()),
 		resource.WithTelemetrySDK(),
 		resource.WithFromEnv(),
-		resource.WithAttributes([]attribute.KeyValue{
-			{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
-		}...))
-	return gclr, nil
+		resource.WithAttributes(
+			attribute.String("gcp.resource_type", monitoredResourceName),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating monitored resource: %w", err)
+	}
+	return res, nil
 }
 
 // setupOpenTelemetry sets up OpenTelemetry for the gRPC load test client, initializing the exporter and provider.
 func setupOpenTelemetry() ([]grpc.DialOption, error) {
 	ctx := context.Background()
 	var exporter metric.Exporter
-	gclr, err := newGrpcLoadTestMonitoredResource(ctx)
+	res, err := newGrpcLoadTestMonitoredResource(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create monitored resource: %v", err)
 	}
-	exporter, err = gclr.exporter()
+	exporter, err = createExporter()
 	if err != nil {
 		log.Fatalf("Failed to create exporter: %v", err)
 	}
 	log.Println("Created exporter.")
 	meterOpts := []metric.Option{
-		metric.WithResource(gclr.resource),
+		metric.WithResource(res),
 		metric.WithReader(metric.NewPeriodicReader(exporter, metric.WithInterval(90*time.Second))),
 	}
 	provider := metric.NewMeterProvider(meterOpts...)
@@ -150,7 +145,6 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 			ctx := context.Background()
 			log.Printf("Starting concurrency goroutine #%d for method: %s", i, methodName)
 			for {
-				// 				log.Printf("Executing method: %s", methodName)
 				err := methodFunc(ctx, stub)
 				if err != nil {
 					log.Printf("Error executing %s #%d: %v", methodName, i, err)
@@ -162,28 +156,23 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 }
 
 func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
-	// 	log.Println("EmptyCall Execution.")
 	_, err := tc.EmptyCall(ctx, &empty.Empty{})
 	if err != nil {
 		return fmt.Errorf("EmptyCall RPC failed: %v", err)
 	}
-	// 	log.Println("EmptyCall completed successfully.")
 	return nil
 }
 
 func ExecuteUnaryCalls(ctx context.Context, tc test.TestServiceClient) error {
-	// 	log.Println("UnaryCall Execution.")
 	req := &messages.SimpleRequest{}
 	_, err := tc.UnaryCall(ctx, req)
 	if err != nil {
 		return fmt.Errorf("UnaryCall RPC failed: ", err)
 	}
-	// 	log.Println("UnaryCall completed successfully.")
 	return nil
 }
 
 func ExecuteStreamingInputCalls(ctx context.Context, tc test.TestServiceClient) error {
-	log.Println("Start StreamingInputCalls Execution.")
 	stream, err := tc.StreamingInputCall(ctx)
 	if err != nil {
 		return fmt.Errorf("%v.StreamingInputCall(_) = _, %v", tc, err)
@@ -199,12 +188,10 @@ func ExecuteStreamingInputCalls(ctx context.Context, tc test.TestServiceClient) 
 	if err != nil {
 		return fmt.Errorf("%v.CloseAndRecv() got error %v, want %v", stream, err, nil)
 	}
-	log.Println("StreamingInputCalls completed successfully.")
 	return nil
 }
 
 func ExecuteStreamingOutputCalls(ctx context.Context, tc test.TestServiceClient) error {
-	log.Println("StreamingOutputCalls Execution.")
 	req := &messages.StreamingOutputCallRequest{}
 	stream, err := tc.StreamingOutputCall(ctx, req)
 	if err != nil {
@@ -223,7 +210,6 @@ func ExecuteStreamingOutputCalls(ctx context.Context, tc test.TestServiceClient)
 	if rpcStatus != io.EOF {
 		return fmt.Errorf("failed to finish the server streaming rpc: %v", rpcStatus)
 	}
-	log.Println("StreamingOutputCalls completed successfully.")
 	return nil
 }
 
@@ -252,7 +238,6 @@ func ExecuteFullDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 }
 
 func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) error {
-	log.Println("HalfDuplexCall Execution.")
 	stream, err := tc.HalfDuplexCall(ctx)
 	if err != nil {
 		return fmt.Errorf("%v.HalfDuplexCall(_) = _, %v", tc, err)
@@ -308,7 +293,6 @@ func main() {
 	opts = append(opts, grpc.WithCredentialsBundle(google.NewDefaultCredentials()))
 	log.Println("Attempting to create gRPC connection...")
 	conn, err := grpc.NewClient(serverAddr, opts...)
-	log.Println("Connection attempt made.")
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server %v", err)
 	}
