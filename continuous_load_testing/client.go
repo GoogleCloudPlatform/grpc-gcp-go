@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 
 	"continuous_load_testing/proto/grpc/testing/messages"
 	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
+	"go.opentelemetry.io/contrib/detectors/gcp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -37,11 +37,11 @@ const (
 
 var (
 	serverAddr    = "google-c2p:///directpathgrpctesting-pa.googleapis.com"
-	concurrency   = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
+	concurrency   = flag.Int("concurrency", 3, "Number of concurrent workers (default 1)")
 	numOfRequests = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
 	methodsInput  = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
-
-	methods = map[string]bool{
+	numOfMethods  = 0
+	methods       = map[string]bool{
 		"EmptyCall":           false,
 		"UnaryCall":           false,
 		"StreamingInputCall":  false,
@@ -52,21 +52,13 @@ var (
 )
 
 type grpcGCPClientContinuousLoadTestResource struct {
-	project_id     string
-	location       string
-	cluster_name   string
-	namespace_name string
-	pod_name       string
-	container_name string
-	resource       *resource.Resource
+	resource *resource.Resource
 }
 
 func (gclr *grpcGCPClientContinuousLoadTestResource) exporter() (metric.Exporter, error) {
 	exporter, err := mexporter.New(
-		mexporter.WithProjectID(gclr.project_id),
 		mexporter.WithMetricDescriptorTypeFormatter(metricFormatter),
 		mexporter.WithCreateServiceTimeSeries(),
-		mexporter.WithMonitoredResourceDescription(monitoredResourceName, []string{"project_id", "location", "cluster_name", "namespace_name", "pod_name", "container_name"}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating metrics exporter: %w", err)
@@ -81,31 +73,15 @@ func newGrpcLoadTestMonitoredResource(ctx context.Context, opts ...resource.Opti
 	if err != nil {
 		return nil, err
 	}
-	gclr := &grpcGCPClientContinuousLoadTestResource{
-		pod_name:       getEnv("POD_NAME", ""),
-		namespace_name: getEnv("NAMESPACE_NAME", ""),
-		container_name: getEnv("CONTAINER_NAME", ""),
-		project_id:     "directpathgrpctesting-client",
-		location:       "us-west1",
-		cluster_name:   "cluster-1",
-	}
-	gclr.resource, err = resource.New(ctx, resource.WithAttributes([]attribute.KeyValue{
-		{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
-		{Key: "project_id", Value: attribute.StringValue(gclr.project_id)},
-		{Key: "location", Value: attribute.StringValue(gclr.location)},
-		{Key: "cluster_name", Value: attribute.StringValue(gclr.cluster_name)},
-		{Key: "namespace_name", Value: attribute.StringValue(gclr.namespace_name)},
-		{Key: "pod_name", Value: attribute.StringValue(gclr.pod_name)},
-		{Key: "container_name", Value: attribute.StringValue(gclr.container_name)},
-	}...))
+	gclr := &grpcGCPClientContinuousLoadTestResource{}
+	gclr.resource, err = resource.New(ctx,
+		resource.WithDetectors(gcp.NewDetector()),
+		resource.WithTelemetrySDK(),
+		resource.WithFromEnv(),
+		resource.WithAttributes([]attribute.KeyValue{
+			{Key: "gcp.resource_type", Value: attribute.StringValue(monitoredResourceName)},
+		}...))
 	return gclr, nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
 }
 
 // setupOpenTelemetry sets up OpenTelemetry for the gRPC load test client, initializing the exporter and provider.
@@ -166,12 +142,15 @@ func metricFormatter(m metricdata.Metrics) string {
 // executeMethod executes the RPC call for a specific method with concurrency.
 func executeMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
 	var wg sync.WaitGroup
+	log.Printf("Concurrency level: %d", *concurrency)
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			ctx := context.Background()
+			log.Printf("Starting concurrency goroutine #%d for method: %s", i, methodName)
 			for {
+				// 				log.Printf("Executing method: %s", methodName)
 				err := methodFunc(ctx, stub)
 				if err != nil {
 					log.Printf("Error executing %s #%d: %v", methodName, i, err)
@@ -183,29 +162,28 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 }
 
 func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
+	// 	log.Println("EmptyCall Execution.")
 	_, err := tc.EmptyCall(ctx, &empty.Empty{})
 	if err != nil {
 		return fmt.Errorf("EmptyCall RPC failed: %v", err)
 	}
+	// 	log.Println("EmptyCall completed successfully.")
 	return nil
 }
 
 func ExecuteUnaryCalls(ctx context.Context, tc test.TestServiceClient) error {
-	req := &messages.SimpleRequest{
-		ResponseType: messages.PayloadType_COMPRESSABLE,
-	}
-	reply, err := tc.UnaryCall(ctx, req)
+	// 	log.Println("UnaryCall Execution.")
+	req := &messages.SimpleRequest{}
+	_, err := tc.UnaryCall(ctx, req)
 	if err != nil {
 		return fmt.Errorf("UnaryCall RPC failed: ", err)
 	}
-	t := reply.GetPayload().GetType()
-	if t != messages.PayloadType_COMPRESSABLE {
-		return fmt.Errorf("got the reply with type %d; want %d", t, messages.PayloadType_COMPRESSABLE)
-	}
+	// 	log.Println("UnaryCall completed successfully.")
 	return nil
 }
 
 func ExecuteStreamingInputCalls(ctx context.Context, tc test.TestServiceClient) error {
+	log.Println("Start StreamingInputCalls Execution.")
 	stream, err := tc.StreamingInputCall(ctx)
 	if err != nil {
 		return fmt.Errorf("%v.StreamingInputCall(_) = _, %v", tc, err)
@@ -217,18 +195,17 @@ func ExecuteStreamingInputCalls(ctx context.Context, tc test.TestServiceClient) 
 		}
 
 	}
-	// Receive the response after streaming all requests
 	_, err = stream.CloseAndRecv()
 	if err != nil {
 		return fmt.Errorf("%v.CloseAndRecv() got error %v, want %v", stream, err, nil)
 	}
+	log.Println("StreamingInputCalls completed successfully.")
 	return nil
 }
 
 func ExecuteStreamingOutputCalls(ctx context.Context, tc test.TestServiceClient) error {
-	req := &messages.StreamingOutputCallRequest{
-		ResponseType: messages.PayloadType_COMPRESSABLE,
-	}
+	log.Println("StreamingOutputCalls Execution.")
+	req := &messages.StreamingOutputCallRequest{}
 	stream, err := tc.StreamingOutputCall(ctx, req)
 	if err != nil {
 		return fmt.Errorf("%v.StreamingOutputCall(_) = _, %v", tc, err)
@@ -236,20 +213,17 @@ func ExecuteStreamingOutputCalls(ctx context.Context, tc test.TestServiceClient)
 	var rpcStatus error
 	var index int
 	for {
-		reply, err := stream.Recv()
+		_, err := stream.Recv()
 		if err != nil {
 			rpcStatus = err
 			break
-		}
-		t := reply.GetPayload().GetType()
-		if t != messages.PayloadType_COMPRESSABLE {
-			return fmt.Errorf("got the reply of type %d, want %d", t, messages.PayloadType_COMPRESSABLE)
 		}
 		index++
 	}
 	if rpcStatus != io.EOF {
 		return fmt.Errorf("failed to finish the server streaming rpc: %v", rpcStatus)
 	}
+	log.Println("StreamingOutputCalls completed successfully.")
 	return nil
 }
 
@@ -259,19 +233,13 @@ func ExecuteFullDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 		return fmt.Errorf("%v.FullDuplexCall(_) = _, %v", tc, err)
 	}
 	for i := 0; i < *numOfRequests; i++ {
-		req := &messages.StreamingOutputCallRequest{
-			ResponseType: messages.PayloadType_COMPRESSABLE,
-		}
+		req := &messages.StreamingOutputCallRequest{}
 		if err = stream.Send(req); err != nil {
 			return fmt.Errorf("%v has error %v while sending %v", stream, err, req)
 		}
-		reply, err := stream.Recv()
+		_, err := stream.Recv()
 		if err != nil {
 			return fmt.Errorf("%v.Recv() = %v", stream, err)
-		}
-		t := reply.GetPayload().GetType()
-		if t != messages.PayloadType_COMPRESSABLE {
-			return fmt.Errorf("expected payload type %d, got %d", messages.PayloadType_COMPRESSABLE, t)
 		}
 	}
 	if err = stream.CloseSend(); err != nil {
@@ -284,38 +252,35 @@ func ExecuteFullDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 }
 
 func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) error {
+	log.Println("HalfDuplexCall Execution.")
 	stream, err := tc.HalfDuplexCall(ctx)
 	if err != nil {
 		return fmt.Errorf("%v.HalfDuplexCall(_) = _, %v", tc, err)
 	}
 	for i := 0; i < *numOfRequests; i++ {
-		req := &messages.StreamingOutputCallRequest{
-			ResponseType: messages.PayloadType_COMPRESSABLE,
-		}
+		req := &messages.StreamingOutputCallRequest{}
 		if err = stream.Send(req); err != nil {
 			return fmt.Errorf("%v has error %v while sending %v", stream, err, req)
-		}
-		reply, err := stream.Recv()
-		if err != nil {
-			return fmt.Errorf("%v.Recv() = %v", stream, err)
-		}
-		t := reply.GetPayload().GetType()
-		if t != messages.PayloadType_COMPRESSABLE {
-			return fmt.Errorf("Got the reply of type %d, want %d", t, messages.PayloadType_COMPRESSABLE)
 		}
 	}
 	if err = stream.CloseSend(); err != nil {
 		return fmt.Errorf("%v.CloseSend() got %v, want %v", stream, err, nil)
 	}
+	for i := 0; i < *numOfRequests; i++ {
+		_, err := stream.Recv()
+		if err != nil {
+			return fmt.Errorf("%v.Recv() = %v", stream, err)
+		}
+	}
 	if _, err = stream.Recv(); err != io.EOF {
-		return fmt.Errorf("%v failed to complele the HalfDuplexCalls: %v", stream, err)
+		return fmt.Errorf("%v failed to complete the HalfDuplexCalls: %v", stream, err)
 	}
 	return nil
 }
 
 func main() {
-	log.Println("DirectPath Continuous Load Testing Client Started.")
-	log.Println("start to parse.")
+	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
+	log.Printf("Concurrency level: %d", *concurrency)
 	flag.Parse()
 	if *methodsInput != "" {
 		log.Printf("Methods input received: %s", *methodsInput)
@@ -327,6 +292,7 @@ func main() {
 				log.Fatalf("Invalid method specified: %s. Available methods are: EmptyCall, UnaryCall, StreamingInputCall, StreamingOutputCall, FullDuplexCall, HalfDuplexCall", method)
 			}
 			methods[method] = true
+			numOfMethods += 1
 			log.Printf("Enabled method: %s", method)
 		}
 	} else {
@@ -344,47 +310,37 @@ func main() {
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	log.Println("Connection attempt made.")
 	if err != nil {
-		log.Printf("Failed to connect to gRPC server %v with error: %v", serverAddr, err)
 		log.Fatalf("Failed to connect to gRPC server %v", err)
 	}
 	log.Println("Successfully connected to gRPC server")
 	defer conn.Close()
 	stub := test.NewTestServiceClient(conn)
 	log.Println("gRPC client stub created.")
-	for method, enabled := range methods {
-		if enabled {
-			log.Printf("Method enabled: %s", method)
-		}
-	}
+
 	var wg sync.WaitGroup
-	for i := 0; i < *concurrency; i++ {
+	for i := 0; i < numOfMethods; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			log.Printf("Starting goroutine #%d", i)
+			log.Printf("numOfMethods #%d", numOfMethods)
+			log.Printf("Starting method goroutine #%d", i)
 			if methods["EmptyCall"] {
 				executeMethod("EmptyCall", ExecuteEmptyCalls, stub)
-				log.Printf("EmptyCall #%d done", i)
 			}
 			if methods["UnaryCall"] {
 				executeMethod("UnaryCall", ExecuteUnaryCalls, stub)
-				log.Printf("LargeUnaryCall #%d done", i)
 			}
 			if methods["StreamingInputCall"] {
 				executeMethod("StreamingInputCall", ExecuteStreamingInputCalls, stub)
-				log.Printf("StreamingInputCall #%d done", i)
 			}
 			if methods["StreamingOutputCall"] {
 				executeMethod("StreamingOutputCall", ExecuteStreamingOutputCalls, stub)
-				log.Printf("StreamingOutputCall #%d done", i)
 			}
 			if methods["FullDuplexCall"] {
 				executeMethod("FullDuplexCall", ExecuteFullDuplexCalls, stub)
-				log.Printf("FullDuplexCall #%d done", i)
 			}
 			if methods["HalfDuplexCall"] {
 				executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
-				log.Printf("HalfDuplexCall #%d done", i)
 			}
 		}(i)
 	}
