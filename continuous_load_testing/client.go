@@ -22,8 +22,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc"
-	_ "google.golang.org/grpc/balancer/grpclb" // Register the grpclb load balancing policy.
-	_ "google.golang.org/grpc/balancer/rls"    // Register the RLS load balancing policy.
+	_ "google.golang.org/grpc/balancer/rls" // Register the RLS load balancing policy.
 	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/experimental/stats"
 	"google.golang.org/grpc/stats/opentelemetry"
