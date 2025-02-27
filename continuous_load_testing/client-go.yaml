@@ -29,7 +29,7 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         - name: CONTAINER_NAME
-          value: client-go-manual
+          value: client-go
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(NAMESPACE_NAME),k8s.container.name=$(CONTAINER_NAME)
         resources:
