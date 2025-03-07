@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: client-go-cloudpath
+  name: client-go-cloudpath
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client-go-cloudpath
+  template:
+    metadata:
+      labels:
+        app: client-go-cloudpath
+    spec:
+      containers:
+      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go"
+        imagePullPolicy: Always
+        name: client-go
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CONTAINER_NAME
+          value: client-go-cloudpath
+        - name: GOOGLE_CLOUD_DISABLE_DIRECT_PATH
+          value: "true"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(NAMESPACE_NAME),k8s.container.name=$(CONTAINER_NAME)
+        resources:
+          requests:
+            cpu: "2"
+            memory: "256Mi"
+          limits:
+            cpu: "2"
+            memory: "1024Mi"
