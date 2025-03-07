@@ -7,7 +7,6 @@ echo $ROOT_DIR
 
 go generate && go build
 kubectl delete deployment client-go-manual-directpath
-kubectl delete deployment client-go-manual
 kubectl delete deployment client-go-manual-cloudpath
 docker system prune -af
 docker build --progress=plain --no-cache -t directpathgrpctesting-client-go-manual .
