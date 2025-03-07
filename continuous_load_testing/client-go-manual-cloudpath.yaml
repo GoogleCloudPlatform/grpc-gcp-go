@@ -18,7 +18,7 @@ spec:
       containers:
       - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-manual"
         imagePullPolicy: Always
-        name: client-go-manual
+        name: client-go-manual-cloudpath
         env:
         - name: POD_NAME
           valueFrom:
