@@ -2,23 +2,23 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: client-go-directpath
-  name: client-go-directpath
+    app: client-go-manual
+  name: client-go-manual
   namespace: default
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: client-go-directpath
+      app: client-go-manual
   template:
     metadata:
       labels:
-        app: client-go-directpath
+        app: client-go-manual
     spec:
       containers:
-      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go"
+      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-manual"
         imagePullPolicy: Always
-        name: client-go-directpath
+        name: client-go-manual
         env:
         - name: POD_NAME
           valueFrom:
@@ -29,7 +29,7 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         - name: CONTAINER_NAME
-          value: client-go-directpath
+          value: client-go-manual
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(NAMESPACE_NAME),k8s.container.name=$(CONTAINER_NAME)
         resources:
