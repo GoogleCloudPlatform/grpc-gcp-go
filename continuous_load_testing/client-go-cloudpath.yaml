@@ -30,7 +30,7 @@ spec:
               fieldPath: metadata.namespace
         - name: CONTAINER_NAME
           value: client-go-cloudpath
-        - name: GOOGLE_CLOUD_DISABLE_DIRECT_PATH
+        - name: DISABLE_DIRECT_PATH
           value: "true"
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(NAMESPACE_NAME),k8s.container.name=$(CONTAINER_NAME)
