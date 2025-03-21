@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +40,7 @@ var (
 	cloudPathServerAddr  = "dns:///directpathgrpctesting-pa.googleapis.com"
 	concurrency          = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
 	numOfRequests        = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
+	disableDirectPath    = flag.bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
 		"EmptyCall":           false,
@@ -266,21 +266,17 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 func main() {
 	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
 	log.Printf("Concurrency level: %d", *concurrency)
-	disableDirectPath := os.Getenv("DISABLE_DIRECT_PATH")
-	// Determine the server address based on DISABLE_DIRECT_PATH
+	flag.Parse()
 	var serverAddr string
-	if disableDirectPath == "true" {
+	if *disableDirectPath {
 		serverAddr = cloudPathServerAddr
-
 	} else {
 		serverAddr = directPathServerAddr
 	}
 	log.Printf("serverAddr: %s", serverAddr)
-	flag.Parse()
 	if *methodsInput != "" {
 		log.Printf("Methods input received: %s", *methodsInput)
 		methodList := strings.Split(*methodsInput, ",")
-		log.Printf("Parsed methods: %v", methodList)
 		for _, method := range methodList {
 			method = strings.TrimSpace(method)
 			if _, exists := methods[method]; !exists {
