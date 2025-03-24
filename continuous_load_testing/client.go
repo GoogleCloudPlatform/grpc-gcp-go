@@ -40,7 +40,7 @@ var (
 	cloudPathServerAddr  = "dns:///directpathgrpctesting-pa.googleapis.com"
 	concurrency          = flag.Int("concurrency", 1, "Number of concurrent workers (default 1)")
 	numOfRequests        = flag.Int("num_of_requests", 10, "Total number of rpc requests to make (default 10)")
-	disableDirectPath    = flag.bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
+	disableDirectPath    = flag.Bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
 		"EmptyCall":           false,
