@@ -16,7 +16,7 @@ spec:
         app: client-go-cloudpath-us-east7
     spec:
       containers:
-      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-cloudpath"
+      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-cloudpath-useast7"
         imagePullPolicy: Always
         name: client-go-cloudpath-us-east7
         env:

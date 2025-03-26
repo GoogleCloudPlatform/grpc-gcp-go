@@ -16,7 +16,7 @@ spec:
         app: client-go-us-east7
     spec:
       containers:
-      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go"
+      - image: "us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-useast7"
         imagePullPolicy: Always
         name: client-go-us-east7
         env:
