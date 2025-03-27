@@ -34,8 +34,8 @@ spec:
           value: k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(NAMESPACE_NAME),k8s.container.name=$(CONTAINER_NAME)
         resources:
           requests:
-            cpu: "2"
-            memory: "256Mi"
+            cpu: "1"
+            memory: "128Mi"
           limits:
-            cpu: "2"
-            memory: "1024Mi"
+            cpu: "1"
+            memory: "512Mi"
