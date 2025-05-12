@@ -24,9 +24,12 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/grpclb" // Register the grpclb load balancing policy.
 	_ "google.golang.org/grpc/balancer/rls"    // Register the RLS load balancing policy.
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/experimental/stats"
 	"google.golang.org/grpc/stats/opentelemetry"
+	"google.golang.org/grpc/status"
+
 	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS resolver required for c2p directpath.
 )
 
@@ -294,6 +297,15 @@ func establishBidiStreamWithRetry(ctx context.Context, tc test.TestServiceClient
 	}
 }
 
+// isStreamFatal checks if the error indicates a broken stream that requires reconnection.
+func isStreamFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	code := status.Code(err)
+	return code == codes.Unavailable || code == codes.Canceled || code == codes.Internal
+}
+
 func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
 	stream := establishBidiStream(ctx, tc)
 	for {
@@ -301,13 +313,19 @@ func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceC
 		req := &messages.StreamingOutputCallRequest{}
 		if err := stream.Send(req); err != nil {
 			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
-			stream = establishBidiStreamWithRetry(ctx, tc)
+			if isStreamFatal(err) {
+				log.Println("Re-establishing stream.")
+				stream = establishBidiStreamWithRetry(ctx, tc)
+			}
 			continue
 		}
 		_, err := stream.Recv()
 		if err != nil {
 			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
-			stream = establishBidiStreamWithRetry(ctx, tc)
+			if isStreamFatal(err) {
+				log.Println("Re-establishing stream.")
+				stream = establishBidiStreamWithRetry(ctx, tc)
+			}
 			continue
 		}
 		latency := time.Since(start)
