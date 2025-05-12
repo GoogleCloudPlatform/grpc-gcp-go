@@ -282,12 +282,16 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 }
 
 func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
-	stream, err := tc.FullDuplexCall(ctx)
-	if err != nil {
-		return fmt.Errorf("Failed to start bidi stream: %v", err)
+	// Continuous retry to start the bidi stream until successful
+	for {
+		stream, err := tc.FullDuplexCall(ctx)
+		if err == nil {
+			log.Println("Started persistent bidi stream for SAB latency benchmark.")
+			break
+		}
+		log.Printf("Failed to start bidi stream: %v. Retrying in 10 milliseconds...", err)
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	log.Println("Started persistent bidi stream for SAB latency benchmark.")
 	for {
 		start := time.Now()
 		req := &messages.StreamingOutputCallRequest{}
@@ -300,7 +304,6 @@ func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceC
 		}
 		latency := time.Since(start)
 		log.Printf("BidiStream one request and one response round-trip latency: %v", latency)
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
