@@ -156,6 +156,23 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 	}
 }
 
+// executeBidiMethod launches multiple concurrent workers to run a bidirectional streaming benchmark method.
+// Unlike unary or non-persistent streaming RPCs, each worker here continuously sends and receives messages
+// on a newly created stream. This function is used to benchmark persistent bidirectional streaming virtual
+// gRPC calls like SAB.
+func executeBidiMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
+	log.Printf("Starting %d persistent bidi stream workers for latency benchmark: %s", *concurrency, methodName)
+	for i := 0; i < *concurrency; i++ {
+		go func(workerID int) {
+			ctx := context.Background()
+			log.Printf("Worker #%d: Starting %s", workerID, methodName)
+			if err := methodFunc(ctx, stub); err != nil {
+				log.Printf("Worker #%d: %s exited with error: %v", workerID, methodName, err)
+			}
+		}(i)
+	}
+}
+
 func ExecuteEmptyCalls(ctx context.Context, tc test.TestServiceClient) error {
 	_, err := tc.EmptyCall(ctx, &empty.Empty{})
 	if err != nil {
@@ -354,7 +371,7 @@ func main() {
 		log.Println("HalfDuplexCall method started in background")
 	}
 	if methods["BidiStreamLatencyBenchmark"] {
-		go executeMethod("BidiStreamLatencyBenchmark", ExecuteBidiStreamLatencyBenchmark, stub)
+		go executeBidiMethod("BidiStreamLatencyBenchmark", ExecuteBidiStreamLatencyBenchmark, stub)
 		log.Println("BidiStreamLatencyBenchmark method started in background")
 	}
 	forever := make(chan struct{})
