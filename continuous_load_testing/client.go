@@ -281,26 +281,34 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 	return nil
 }
 
-func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
-	// Continuous retry to start the bidi stream until successful
+// establishBidiStream continuously tries to establish a bidi stream until successful.
+func establishBidiStreamWithRetry(ctx context.Context, tc test.TestServiceClient) test.TestService_FullDuplexCallClient {
 	for {
 		stream, err := tc.FullDuplexCall(ctx)
 		if err == nil {
-			log.Println("Started persistent bidi stream for SAB latency benchmark.")
-			break
+			log.Println("Established a  persistent bidi stream for SAB latency benchmark.")
+			return stream
 		}
-		log.Printf("Failed to start bidi stream: %v. Retrying in 10 milliseconds...", err)
+		log.Printf("Failed to establish bidi stream: %v. Retrying in 10ms...", err)
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
+	stream := establishBidiStream(ctx, tc)
 	for {
 		start := time.Now()
 		req := &messages.StreamingOutputCallRequest{}
 		if err := stream.Send(req); err != nil {
-			return fmt.Errorf("Failed to send request via bidi stream: %v", err)
+			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
+			stream = establishBidiStreamWithRetry(ctx, tc)
+			continue
 		}
 		_, err := stream.Recv()
 		if err != nil {
-			return fmt.Errorf("Failed to receive response via bidi stream: %v", err)
+			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
+			stream = establishBidiStreamWithRetry(ctx, tc)
+			continue
 		}
 		latency := time.Since(start)
 		log.Printf("BidiStream one request and one response round-trip latency: %v", latency)
