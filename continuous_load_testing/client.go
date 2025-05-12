@@ -43,12 +43,13 @@ var (
 	disableDirectPath    = flag.Bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
-		"EmptyCall":           false,
-		"UnaryCall":           false,
-		"StreamingInputCall":  false,
-		"StreamingOutputCall": false,
-		"FullDuplexCall":      false,
-		"HalfDuplexCall":      false,
+		"EmptyCall":                  false,
+		"UnaryCall":                  false,
+		"StreamingInputCall":         false,
+		"StreamingOutputCall":        false,
+		"FullDuplexCall":             false,
+		"HalfDuplexCall":             false,
+		"BidiStreamLatencyBenchmark": false,
 	}
 )
 
@@ -263,6 +264,29 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 	return nil
 }
 
+func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
+	stream, err := tc.FullDuplexCall(ctx)
+	if err != nil {
+		return fmt.Errorf("Failed to start bidi stream: %v", err)
+	}
+
+	log.Println("Started persistent bidi stream for SAB latency benchmark.")
+	for {
+		start := time.Now()
+		req := &messages.StreamingOutputCallRequest{}
+		if err := stream.Send(req); err != nil {
+			return fmt.Errorf("Failed to send request via bidi stream: %v", err)
+		}
+		_, err := stream.Recv()
+		if err != nil {
+			return fmt.Errorf("Failed to receive response via bidi stream: %v", err)
+		}
+		latency := time.Since(start)
+		log.Printf("BidiStream one request and one response round-trip latency: %v", latency)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func main() {
 	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
 	log.Printf("Concurrency level: %d", *concurrency)
@@ -328,6 +352,10 @@ func main() {
 	if methods["HalfDuplexCall"] {
 		go executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
 		log.Println("HalfDuplexCall method started in background")
+	}
+	if methods["BidiStreamLatencyBenchmark"] {
+		go executeMethod("BidiStreamLatencyBenchmark", ExecuteBidiStreamLatencyBenchmark, stub)
+		log.Println("BidiStreamLatencyBenchmark method started in background")
 	}
 	forever := make(chan struct{})
 	<-forever
