@@ -46,13 +46,13 @@ var (
 	disableDirectPath    = flag.Bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
-		"EmptyCall":                  false,
-		"UnaryCall":                  false,
-		"StreamingInputCall":         false,
-		"StreamingOutputCall":        false,
-		"FullDuplexCall":             false,
-		"HalfDuplexCall":             false,
-		"BidiStreamLatencyBenchmark": false,
+		"EmptyCall":                   false,
+		"UnaryCall":                   false,
+		"StreamingInputCall":          false,
+		"StreamingOutputCall":         false,
+		"FullDuplexCall":              false,
+		"HalfDuplexCall":              false,
+		"StreamedSequentialUnaryCall": false,
 	}
 )
 
@@ -162,7 +162,7 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 // executeBidiMethod launches multiple concurrent workers to run a bidirectional streaming benchmark method.
 // Unlike unary or non-persistent streaming RPCs, each worker here continuously sends and receives messages
 // on a newly created stream. This function is used to benchmark persistent bidirectional streaming virtual
-// gRPC calls like SAB.
+// gRPC calls like Steamed Batching.
 func executeBidiMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
 	log.Printf("Starting %d persistent bidi stream workers for latency benchmark: %s", *concurrency, methodName)
 	for i := 0; i < *concurrency; i++ {
@@ -289,7 +289,7 @@ func establishBidiStreamWithRetry(ctx context.Context, tc test.TestServiceClient
 	for {
 		stream, err := tc.FullDuplexCall(ctx)
 		if err == nil {
-			log.Println("Established a  persistent bidi stream for SAB latency benchmark.")
+			log.Println("Established a  persistent bidi stream for Streamed Batching latency benchmark.")
 			return stream
 		}
 		log.Printf("Failed to establish bidi stream: %v. Retrying in 10ms...", err)
@@ -306,7 +306,7 @@ func isStreamFatal(err error) bool {
 	return code == codes.Unavailable || code == codes.Canceled || code == codes.Internal
 }
 
-func ExecuteBidiStreamLatencyBenchmark(ctx context.Context, tc test.TestServiceClient) error {
+func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
 	stream := establishBidiStream(ctx, tc)
 	for {
 		start := time.Now()
@@ -399,9 +399,9 @@ func main() {
 		go executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
 		log.Println("HalfDuplexCall method started in background")
 	}
-	if methods["BidiStreamLatencyBenchmark"] {
-		go executeBidiMethod("BidiStreamLatencyBenchmark", ExecuteBidiStreamLatencyBenchmark, stub)
-		log.Println("BidiStreamLatencyBenchmark method started in background")
+	if methods["StreamedSequentialUnaryCall"] {
+		go executeBidiMethod("StreamedSequentialUnaryCall", ExecuteStreamedSequentialUnaryCall, stub)
+		log.Println("StreamedSequentialUnaryCall method started in background")
 	}
 	forever := make(chan struct{})
 	<-forever
