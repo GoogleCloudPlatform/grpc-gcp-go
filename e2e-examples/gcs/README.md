@@ -3,38 +3,20 @@
 ```sh
 git clone git@github.com:googleapis/googleapis.git
 cd googleapis
-protoc --go_out=plugins=grpc:.. google/storage/v1/*.proto
+protoc --go_out=.. --go-grpc_out=.. google/storage/v2/*.proto
 cd ..
 ```
 
 ## Example commands
 
-Use grpc API for reading a gcs object through CFE:
+Use grpc client to write a 128KiB file to a GCS bucket
 
 ```sh
-go run main.go -bkt=gcs-grpc-team-weiranf -obj=200mb -method=media -calls=50
+go run main.go --method=write --size=128
 ```
 
-Use grpc API for reading metadata of a gcs object through CFE:
+Use grpc client to read a 128KiB file from a GCS bucket
 
 ```sh
-go run main.go -bkt=gcs-grpc-team-weiranf -obj=200mb -method=metadata -calls=50
-```
-
-Use grpc API for writing a 200mb gcs object through CFE:
-
-```sh
-go run main.go -bkt=gcs-grpc-team-weiranf -obj=grpc-write-200mb -method=write -size=204800 -calls=50
-```
-
-To use DirectPath, add the arg `-dp` (VM needs to be dp enabled), for example:
-
-```sh
-go run main.go -bkt=gcs-grpc-team-weiranf -obj=200mb -calls=50 -dp
-```
-
-To use HTTP JSON API, add the arg `-http`, for example:
-
-```sh
-go run main.go -bkt=gcs-grpc-team-weiranf -obj=200mb -method=media -calls=50 -http
+go run main.go --method=read --size=128
 ```

@@ -6,343 +6,186 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"io/ioutil"
 	"os"
-	"sort"
-	"strings"
 	"time"
 
+	gcspb "github.com/GoogleCloudPlatform/grpc-gcp-go/e2e-examples/gcs/cloud.google.com/go/storage/genproto/apiv2/storagepb"
+
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	_ "google.golang.org/grpc/balancer/rls"
+	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/metadata"
-
-	"cloud.google.com/go/storage"
-
-	gcspb "github.com/GoogleCloudPlatform/grpc-gcp-go/e2e-examples/gcs/google.golang.org/genproto/googleapis/storage/v1"
-	wrappers "github.com/golang/protobuf/ptypes/wrappers"
-	_ "google.golang.org/grpc/balancer/grpclb"
-	grpcgoogle "google.golang.org/grpc/credentials/google"
-	"google.golang.org/grpc/credentials/oauth"
-)
-
-const (
-	target = "storage.googleapis.com:443"
-	scope  = "https://www.googleapis.com/auth/cloud-platform"
+	"google.golang.org/grpc/resolver"
+	_ "google.golang.org/grpc/xds/googledirectpath"
 )
 
 var (
-	dp         = flag.Bool("dp", false, "whether use directpath")
-	corp       = flag.Bool("corp", false, "whether calling from corp machine")
-	useHttp    = flag.Bool("http", false, "whether to use http client")
-	objectName = flag.String("obj", "a", "gcs object name")
-	bucketName = flag.String("bkt", "gcs-grpc-team-weiranf", "gcs bucket name")
-	numCalls   = flag.Int("calls", 1, "num of calls")
-	uploadSize = flag.Int("upload", 0, "upload size in kb")
-	cookie     = flag.String("cookie", "", "cookie header")
-	method     = flag.String("method", "media", "method names")
-	size       = flag.Int("size", 0, "write size in kb")
+	dp           = flag.Bool("dp", true, "whether use directpath")
+	td           = flag.Bool("td", true, "whether use traffic director")
+	host         = flag.String("host", "storage.googleapis.com", "gcs backend hostname")
+	clientType   = flag.String("client", "go-grpc", "type of client")
+	objectFormat = flag.String("obj_format", "write/128KiB/128KiB", "gcs object name")
+	bucketName   = flag.String("bkt", "gcs-grpc-team-dp-test-us-central1", "gcs bucket name")
+	numCalls     = flag.Int("calls", 1, "num of calls")
+	numWarmups   = flag.Int("warmups", 1, "num of warmup calls")
+	numThreads   = flag.Int("threads", 1, "num of threads")
+	method       = flag.String("method", "write", "method names")
+	size         = flag.Int("size", 128, "write size in kb")
 )
 
-func upload(client *storage.Client, kb int) {
-	ctx := context.Background()
-	obj := client.Bucket(*bucketName).Object(*objectName)
-	w := obj.NewWriter(ctx)
-	msg := strings.Repeat("x", kb*1024)
-	if _, err := fmt.Fprint(w, msg); err != nil {
-		fmt.Println("Failed to write message to object: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		fmt.Println("object writer failed closing: %v", err)
-		os.Exit(1)
-	}
+func getBucketName() string {
+	return fmt.Sprintf("projects/_/buckets/%s", *bucketName)
+}
+
+func addBucketMetadataToCtx(ctx context.Context) context.Context {
+	return metadata.AppendToOutgoingContext(ctx,
+		"x-goog-request-params",
+		fmt.Sprintf("bucket=%s", getBucketName()))
 }
 
 func getGrpcClient() gcspb.StorageClient {
+	resolver.SetDefaultScheme("dns")
+	endpoint := fmt.Sprintf("google-c2p:///%s", *host)
 
 	var grpcOpts []grpc.DialOption
-	endpoint := target
-
-	if *dp {
-		endpoint = "dns:///" + target
-		grpcOpts = []grpc.DialOption{
-			grpc.WithCredentialsBundle(
-				grpcgoogle.NewComputeEngineCredentials(),
-			),
-			grpc.WithDisableServiceConfig(),
-			grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"grpclb":{"childPolicy":[{"pick_first":{}}]}}]}`),
-		}
-	} else if *corp {
-		// client is calling from corp machine
-		keyFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-		perRPC, err := oauth.NewServiceAccountFromFile(keyFile, scope)
-		if err != nil {
-			fmt.Println("Failed to create credentials: %v", err)
-			os.Exit(1)
-		}
-		grpcOpts = []grpc.DialOption{
-			grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
-			grpc.WithPerRPCCredentials(perRPC),
-		}
-	} else {
-		// client is calling from GCE
-		grpcOpts = []grpc.DialOption{
-			grpc.WithCredentialsBundle(
-				grpcgoogle.NewComputeEngineCredentials(),
-			),
-		}
+	grpcOpts = []grpc.DialOption{
+		grpc.WithCredentialsBundle(
+			google.NewComputeEngineCredentials(),
+		),
 	}
-
-	cc, err := grpc.Dial(endpoint, grpcOpts...)
-
+	conn, err := grpc.Dial(endpoint, grpcOpts...)
 	if err != nil {
 		fmt.Println("Failed to create clientconn: %v", err)
 		os.Exit(1)
 	}
-
-	return gcspb.NewStorageClient(cc)
+	return gcspb.NewStorageClient(conn)
 }
 
-func getHttpClient() *storage.Client {
+func readRequest(client gcspb.StorageClient) {
 	ctx := context.Background()
-	httpClient, err := storage.NewClient(ctx)
+	req := gcspb.ReadObjectRequest{
+		Bucket: getBucketName(),
+		Object: *objectFormat,
+	}
+	ctx = addBucketMetadataToCtx(ctx)
+	start := time.Now()
+	stream, err := client.ReadObject(ctx, &req)
 	if err != nil {
-		fmt.Println("Failed to create http client: %v", err)
+		fmt.Println("ReadObject got error: ", err)
 		os.Exit(1)
 	}
-	return httpClient
-}
-
-func makeGrpcRequest(client gcspb.StorageClient) []int {
-	fmt.Println("========================== start grpc calls ===============================")
-	res := []int{}
-
-	switch *method {
-	case "media":
-		req := gcspb.GetObjectMediaRequest{
-			Bucket: *bucketName,
-			Object: *objectName,
+	for {
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			fmt.Println("Done reading object.")
+			break
 		}
-
-		for i := 0; i < *numCalls; i++ {
-			ctx := context.Background()
-			if i == *numCalls-1 {
-				md := metadata.Pairs("cookie", *cookie)
-				ctx = metadata.NewOutgoingContext(ctx, md)
-			}
-
-			start := time.Now()
-			stream, err := client.GetObjectMedia(ctx, &req)
-			if err != nil {
-				fmt.Println("GetObjectMedia got error: ", err)
-				os.Exit(1)
-			}
-
-			for {
-				_, err := stream.Recv()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					fmt.Println("stream.Recv() got error: ", err)
-					os.Exit(1)
-				}
-				//fmt.Printf("rsp: %+v\n", rsp)
-			}
-			total := time.Since(start).Milliseconds()
-			res = append(res, int(total))
-			fmt.Println("total time in ms for GetObjectMedia: ", total)
+		if err != nil {
+			fmt.Println("ReadObject Recv error: ", err)
+			os.Exit(1)
 		}
-	case "metadata":
-		req := gcspb.GetObjectRequest{
-			Bucket: *bucketName,
-			Object: *objectName,
-		}
-		for i := 0; i < *numCalls; i++ {
-			ctx := context.Background()
-			start := time.Now()
-			_, err := client.GetObject(ctx, &req)
-			if err != nil {
-				fmt.Println("GetObject got error: ", err)
-				os.Exit(1)
-			}
-			//fmt.Printf("-----> GetObject result: %+v\n", obj)
-			total := time.Since(start).Milliseconds()
-			res = append(res, int(total))
-			fmt.Println("total time in ms for GetObjectMedia: ", total)
-		}
-	case "write":
-		totalBytes := *size * 1024
-
-		for i := 0; i < *numCalls; i++ {
-			ctx := context.Background()
-			start := time.Now()
-			stream, err := client.InsertObject(ctx)
-			if err != nil {
-				fmt.Println("InsertObject got error: ", err)
-				os.Exit(1)
-			}
-
-			offset := 0
-			isFirst := true
-			isLast := false
-
-			for offset < totalBytes {
-				//fmt.Printf("-----> offset: %v\n", offset)
-				var add int
-				if offset+int(gcspb.ServiceConstants_MAX_WRITE_CHUNK_BYTES) <= totalBytes {
-					add = int(gcspb.ServiceConstants_MAX_WRITE_CHUNK_BYTES)
-				} else {
-					add = totalBytes - offset
-				}
-				if offset+add == totalBytes {
-					isLast = true
-				}
-				buf := make([]byte, add, add)
-				//fmt.Printf("-----> buf: %v\n", buf)
-				req := getInsertRequest(isFirst, isLast, int64(offset), buf)
-				//fmt.Printf("-----> req: %+v\n", req)
-				if err := stream.Send(req); err != nil {
-					fmt.Println("stream.Send got error: ", err)
-				}
-				isFirst = false
-				offset += add
-			}
-			stream.CloseAndRecv()
-
-			total := time.Since(start).Milliseconds()
-			//fmt.Printf("-----> GetObject result: %+v\n", obj)
-			res = append(res, int(total))
-			fmt.Println("total time in ms for streaming write: ", total)
-		}
+		len := len(resp.GetChecksummedData().GetContent())
+		fmt.Printf("bytes read: %d\n", len)
 	}
-	return res
+	total := time.Since(start).Milliseconds()
+	fmt.Println("total time in ms for read: ", total)
 }
 
-func getInsertRequest(isFirst bool, isLast bool, offset int64, buf []byte) *gcspb.InsertObjectRequest {
-	req := &gcspb.InsertObjectRequest{}
+func getWriteRequest(isFirst bool, isLast bool, offset int64, data []byte) *gcspb.WriteObjectRequest {
+	crc32c := crc32.MakeTable(crc32.Castagnoli)
+	checksum := crc32.Checksum(data, crc32c)
+
+	req := &gcspb.WriteObjectRequest{}
 	if isFirst {
-		req.FirstMessage = &gcspb.InsertObjectRequest_InsertObjectSpec{
-			InsertObjectSpec: &gcspb.InsertObjectSpec{
+		req.FirstMessage = &gcspb.WriteObjectRequest_WriteObjectSpec{
+			WriteObjectSpec: &gcspb.WriteObjectSpec{
 				Resource: &gcspb.Object{
-					Bucket: *bucketName,
-					Name:   *objectName,
+					Bucket: getBucketName(),
+					Name:   *objectFormat,
 				},
 			},
 		}
 	}
-	crc32c := crc32.MakeTable(crc32.Castagnoli)
-	req.Data = &gcspb.InsertObjectRequest_ChecksummedData{
+	req.WriteOffset = offset
+	req.Data = &gcspb.WriteObjectRequest_ChecksummedData{
 		ChecksummedData: &gcspb.ChecksummedData{
-			Content: buf,
-			Crc32C: &wrappers.UInt32Value{
-				Value: crc32.Checksum(buf, crc32c),
-			},
+			Content: data,
+			Crc32C:  &checksum,
 		},
 	}
-	req.WriteOffset = offset
 	if isLast {
 		req.FinishWrite = true
 	}
 	return req
 }
 
-func makeJsonRequest(client *storage.Client) []int {
-	fmt.Println("========================== start http calls ===============================")
-	res := []int{}
+func writeRequest(client gcspb.StorageClient) {
+	ctx := context.Background()
+	ctx = addBucketMetadataToCtx(ctx)
 
-	switch *method {
-	case "media":
-		for i := 0; i < *numCalls; i++ {
-			start := time.Now()
-			obj := client.Bucket(*bucketName).Object(*objectName)
-			rc, err := obj.NewReader(context.Background())
-			if err != nil {
-				fmt.Println("Failed to create object reader: %v", err)
-				os.Exit(1)
-			}
-			defer rc.Close()
+	totalBytes := *size * 1024
+	offset := 0
+	isFirst := true
+	isLast := false
 
-			_, err = ioutil.ReadAll(rc)
-			if err != nil {
-				fmt.Println("Failed to read data from object: %v", err)
-				os.Exit(1)
-			}
-			total := time.Since(start).Milliseconds()
-			res = append(res, int(total))
-			//fmt.Printf("http object data: %s\n", data)
-			fmt.Println("total time in ms for read: ", total)
-		}
-	case "metadata":
-		for i := 0; i < *numCalls; i++ {
-			ctx := context.Background()
-			start := time.Now()
-			obj := client.Bucket(*bucketName).Object(*objectName)
-			_, err := obj.Attrs(ctx)
-			if err != nil {
-				fmt.Println("obj.Attrs() got error: ", err)
-				os.Exit(1)
-			}
-			//fmt.Printf("-----> obj.Attrs() result: %+v\n", attr)
-			total := time.Since(start).Milliseconds()
-			res = append(res, int(total))
-			fmt.Println("total time in ms for read attributes: ", total)
-		}
-	case "write":
-		for i := 0; i < *numCalls; i++ {
-			ctx := context.Background()
-			start := time.Now()
-			msg := strings.Repeat("x", *size*1024)
-			obj := client.Bucket(*bucketName).Object(*objectName)
-			w := obj.NewWriter(ctx)
-			if _, err := fmt.Fprint(w, msg); err != nil {
-				fmt.Println("Failed to write message to object: %v", err)
-			}
-			if err := w.Close(); err != nil {
-				fmt.Println("object writer failed closing: %v", err)
-				os.Exit(1)
-			}
-			total := time.Since(start).Milliseconds()
-			res = append(res, int(total))
-			fmt.Println("total time in ms for http write: ", total)
-		}
-
+	start := time.Now()
+	stream, err := client.WriteObject(ctx)
+	if err != nil {
+		fmt.Println("WriteObject got error: ", err)
+		os.Exit(1)
 	}
-	return res
-}
 
-func printResult(res []int) {
-	sort.Ints(res)
-	n := len(res)
-	sum := 0
-	for _, r := range res {
-		sum += r
+	for offset < totalBytes {
+		var add int
+		if offset+int(gcspb.ServiceConstants_MAX_WRITE_CHUNK_BYTES) <= totalBytes {
+			add = int(gcspb.ServiceConstants_MAX_WRITE_CHUNK_BYTES)
+		} else {
+			add = totalBytes - offset
+		}
+		if offset+add == totalBytes {
+			isLast = true
+		}
+		data := make([]byte, add, add)
+		req := getWriteRequest(isFirst, isLast, int64(offset), data)
+		fmt.Printf("writing %d bytes\n", add)
+		if err := stream.Send(req); err != nil {
+			fmt.Println("stream.Send got error: ", err)
+		}
+		isFirst = false
+		offset += add
 	}
-	fmt.Printf(
-		"\n\t\tAvg\tMin\tp50\tp90\tp99\tMax\n"+
-			"Time(ms)\t%v\t%v\t%v\t%v\t%v\t%v\n",
-		sum/n,
-		res[0],
-		res[int(float64(n)*0.5)],
-		res[int(float64(n)*0.9)],
-		res[int(float64(n)*0.99)],
-		res[n-1],
-	)
+	stream.CloseAndRecv()
+	total := time.Since(start).Milliseconds()
+	fmt.Println("total time in ms for write: ", total)
 }
 
 func main() {
 	flag.Parse()
-	if *uploadSize > 0 {
-		httpClient := getHttpClient()
-		upload(httpClient, *uploadSize)
-		return
+	if !*dp {
+		fmt.Println("only directpath is supported for now")
+		os.Exit(1)
 	}
-	var res []int
-	if *useHttp {
-		httpClient := getHttpClient()
-		res = makeJsonRequest(httpClient)
-	} else {
-		grpcClient := getGrpcClient()
-		res = makeGrpcRequest(grpcClient)
+	if !*td {
+		fmt.Println("only traffic director is supported for now")
+		os.Exit(1)
 	}
-	printResult(res)
+
+	var client gcspb.StorageClient
+	switch *clientType {
+	case "go-grpc":
+		client = getGrpcClient()
+	default:
+		fmt.Printf("Unsupported --client=%s\n", *clientType)
+		os.Exit(1)
+	}
+
+	switch *method {
+	case "write":
+		writeRequest(client)
+	case "read":
+		readRequest(client)
+	default:
+		fmt.Printf("Unsupported --method=%s\n", *method)
+		os.Exit(1)
+	}
 }
