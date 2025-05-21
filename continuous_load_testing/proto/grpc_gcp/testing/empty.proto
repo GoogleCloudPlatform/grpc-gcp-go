@@ -1,7 +1,6 @@
 syntax = "proto3";
 
-package grpc_gcp.testing;
-
+package grpc_gcp.continuous_load_testing;
 option go_package = "continuous_load_testing/proto/grpc_gcp/testing";
 
 // An empty message that you can re-use to avoid defining duplicated empty

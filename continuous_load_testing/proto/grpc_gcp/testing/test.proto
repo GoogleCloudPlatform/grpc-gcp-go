@@ -1,7 +1,7 @@
 syntax = "proto3";
 
-import "grpc_gcp/testing/messages.proto";
-import "grpc_gcp/testing/empty.proto";
+import "messages.proto";
+import "empty.proto";
 
 package grpc_gcp.continuous_load_testing;
 
