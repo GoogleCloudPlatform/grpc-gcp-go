@@ -24,9 +24,12 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/grpclb" // Register the grpclb load balancing policy.
 	_ "google.golang.org/grpc/balancer/rls"    // Register the RLS load balancing policy.
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/experimental/stats"
 	"google.golang.org/grpc/stats/opentelemetry"
+	"google.golang.org/grpc/status"
+
 	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS resolver required for c2p directpath.
 )
 
@@ -43,12 +46,13 @@ var (
 	disableDirectPath    = flag.Bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
-		"EmptyCall":           false,
-		"UnaryCall":           false,
-		"StreamingInputCall":  false,
-		"StreamingOutputCall": false,
-		"FullDuplexCall":      false,
-		"HalfDuplexCall":      false,
+		"EmptyCall":                   false,
+		"UnaryCall":                   false,
+		"StreamingInputCall":          false,
+		"StreamingOutputCall":         false,
+		"FullDuplexCall":              false,
+		"HalfDuplexCall":              false,
+		"StreamedSequentialUnaryCall": false,
 	}
 )
 
@@ -150,6 +154,23 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 				if err != nil {
 					log.Printf("Error executing %s #%d: %v", methodName, i, err)
 				}
+			}
+		}(i)
+	}
+}
+
+// executeBidiMethod launches multiple concurrent workers to run a bidirectional streaming benchmark method.
+// Unlike unary or non-persistent streaming RPCs, each worker here continuously sends and receives messages
+// on a newly created stream. This function is used to benchmark persistent bidirectional streaming virtual
+// gRPC calls like Steamed Batching.
+func executeBidiMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
+	log.Printf("Starting %d persistent bidi stream workers for latency benchmark: %s", *concurrency, methodName)
+	for i := 0; i < *concurrency; i++ {
+		go func(workerID int) {
+			ctx := context.Background()
+			log.Printf("Worker #%d: Starting %s", workerID, methodName)
+			if err := methodFunc(ctx, stub); err != nil {
+				log.Printf("Worker #%d: %s exited with error: %v", workerID, methodName, err)
 			}
 		}(i)
 	}
@@ -263,6 +284,55 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 	return nil
 }
 
+// establishBidiStream continuously tries to establish a bidi stream until successful.
+func establishBidiStreamWithRetry(ctx context.Context, tc test.TestServiceClient) test.TestService_FullDuplexCallClient {
+	for {
+		stream, err := tc.FullDuplexCall(ctx)
+		if err == nil {
+			log.Println("Established a  persistent bidi stream for Streamed Batching latency benchmark.")
+			return stream
+		}
+		log.Printf("Failed to establish bidi stream: %v. Retrying in 10ms...", err)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// isStreamFatal checks if the error indicates a broken stream that requires reconnection.
+func isStreamFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	code := status.Code(err)
+	return code == codes.Unavailable || code == codes.Canceled || code == codes.Internal
+}
+
+func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
+	stream := establishBidiStream(ctx, tc)
+	for {
+		start := time.Now()
+		req := &messages.StreamingOutputCallRequest{}
+		if err := stream.Send(req); err != nil {
+			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
+			if isStreamFatal(err) {
+				log.Println("Re-establishing stream.")
+				stream = establishBidiStreamWithRetry(ctx, tc)
+			}
+			continue
+		}
+		_, err := stream.Recv()
+		if err != nil {
+			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
+			if isStreamFatal(err) {
+				log.Println("Re-establishing stream.")
+				stream = establishBidiStreamWithRetry(ctx, tc)
+			}
+			continue
+		}
+		latency := time.Since(start)
+		log.Printf("BidiStream one request and one response round-trip latency: %v", latency)
+	}
+}
+
 func main() {
 	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
 	log.Printf("Concurrency level: %d", *concurrency)
@@ -328,6 +398,10 @@ func main() {
 	if methods["HalfDuplexCall"] {
 		go executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
 		log.Println("HalfDuplexCall method started in background")
+	}
+	if methods["StreamedSequentialUnaryCall"] {
+		go executeBidiMethod("StreamedSequentialUnaryCall", ExecuteStreamedSequentialUnaryCall, stub)
+		log.Println("StreamedSequentialUnaryCall method started in background")
 	}
 	forever := make(chan struct{})
 	<-forever
