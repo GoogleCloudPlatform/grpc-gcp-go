@@ -160,8 +160,8 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 }
 
 // executeBidiMethod launches multiple concurrent workers to run a bidirectional streaming benchmark method.
-// Unlike unary or non-persistent streaming RPCs, each worker here continuously sends and receives messages
-// on a newly created stream. This function is used to benchmark persistent bidirectional streaming virtual
+// Unlike unary or streaming RPCs, each worker here continuously sends and receives messages
+// on a newly created stream. This function is used to benchmark bidirectional streaming virtual
 // gRPC calls like Steamed Batching.
 func executeBidiMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
 	log.Printf("Starting %d persistent bidi stream workers for latency benchmark: %s", *concurrency, methodName)
