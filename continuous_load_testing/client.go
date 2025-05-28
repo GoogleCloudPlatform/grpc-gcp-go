@@ -284,52 +284,31 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 	return nil
 }
 
-// establishBidiStream continuously tries to establish a bidi stream until successful.
-func establishBidiStreamWithRetry(ctx context.Context, tc test.TestServiceClient) test.TestService_FullDuplexCallClient {
-	for {
-		stream, err := tc.FullDuplexCall(ctx)
-		if err == nil {
-			log.Println("Established a  persistent bidi stream for Streamed Batching latency benchmark.")
-			return stream
-		}
-		log.Printf("Failed to establish bidi stream: %v. Retrying in 10ms...", err)
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// isStreamFatal checks if the error indicates a broken stream that requires reconnection.
-func isStreamFatal(err error) bool {
-	if err == nil {
-		return false
-	}
-	code := status.Code(err)
-	return code == codes.Unavailable || code == codes.Canceled || code == codes.Internal
-}
-
 func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
-	stream := establishBidiStream(ctx, tc)
 	for {
-		start := time.Now()
-		req := &messages.StreamingOutputCallRequest{}
-		if err := stream.Send(req); err != nil {
-			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
-			if isStreamFatal(err) {
-				log.Println("Re-establishing stream.")
-				stream = establishBidiStreamWithRetry(ctx, tc)
-			}
-			continue
-		}
-		_, err := stream.Recv()
+		stream, err := tc.StreamedSequentialUnaryCall(ctx)
 		if err != nil {
-			log.Printf("Failed to send on bidi stream: %v. Re-establishing stream...", err)
-			if isStreamFatal(err) {
-				log.Println("Re-establishing stream.")
-				stream = establishBidiStreamWithRetry(ctx, tc)
-			}
+			log.Printf("Failed to create StreamedSequentialUnaryCall stream: %v. Retrying...", err)
 			continue
 		}
-		latency := time.Since(start)
-		log.Printf("BidiStream one request and one response round-trip latency: %v", latency)
+		log.Println("StreamedSequentialUnaryCall stream established.")
+
+		for {
+			req := &messages.SimpleRequest{}
+			startTime := time.Now()
+			if err := stream.Send(req); err != nil {
+				log.Printf("Error sending on stream (discarding latency calculation): %v", err)
+				break
+			}
+			_, err := stream.Recv()
+			if err != nil {
+				log.Printf("Error receiving from stream (discarding latency calculation): %v", err)
+				break
+			}
+			latency := time.Since(startTime)
+			log.Printf("Round trip latency: %v", latency)
+		}
+		log.Println("Restarting stream after failure or completion.")
 	}
 }
 
