@@ -1,7 +1,7 @@
 syntax = "proto3";
 
-import "messages.proto";
-import "empty.proto";
+import "grpc_gcp/testing/empty.proto";
+import "grpc_gcp/testing/messages.proto";
 
 package grpc_gcp.continuous_load_testing;
 
@@ -12,7 +12,7 @@ option go_package = "continuous_load_testing/proto/grpc_gcp/testing";
 // performance with various types of payload.
 service TestService {
   // One empty request followed by one empty response.
-  rpc EmptyCall(grpc.testing.Empty) returns (grpc.testing.Empty);
+  rpc EmptyCall(grpc_gcp.continuous_load_testing.Empty) returns (grpc_gcp.continuous_load_testing.Empty);
 
   // One request followed by one response.
   rpc UnaryCall(SimpleRequest) returns (SimpleResponse);
@@ -47,9 +47,9 @@ service TestService {
 
   // The test server will not implement this method. It will be used
   // to test the behavior when clients call unimplemented methods.
-  rpc UnimplementedCall(grpc.testing.Empty) returns (grpc.testing.Empty);
+  rpc UnimplementedCall(grpc_gcp.continuous_load_testing.Empty) returns (grpc_gcp.continuous_load_testing.Empty);
 
-  // A persistent bidirectional streaming RPC where messages are in sequence in the same bidi stream.
+  // A bidirectional streaming RPC where messages are in sequence in the same bidi stream.
   // The client sends one request followed by one response.
   // This sequential message exchange over a bidi stream is used to benchmark
   // latency in Streamed Batching.
