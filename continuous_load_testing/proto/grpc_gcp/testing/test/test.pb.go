@@ -7,8 +7,7 @@
 package testing
 
 import (
-	empty "continuous_load_testing/proto/grpc_gcp/testing/empty"
-	messages "continuous_load_testing/proto/grpc_gcp/testing/messages"
+	messages "continuous_load_testing/proto/grpc/testing/messages"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -26,48 +25,19 @@ var File_grpc_gcp_testing_test_proto protoreflect.FileDescriptor
 
 const file_grpc_gcp_testing_test_proto_rawDesc = "" +
 	"\n" +
-	"\x1bgrpc_gcp/testing/test.proto\x12 grpc_gcp.continuous_load_testing\x1a\x1cgrpc_gcp/testing/empty.proto\x1a\x1fgrpc_gcp/testing/messages.proto2\x96\t\n" +
-	"\vTestService\x12]\n" +
-	"\tEmptyCall\x12'.grpc_gcp.continuous_load_testing.Empty\x1a'.grpc_gcp.continuous_load_testing.Empty\x12n\n" +
-	"\tUnaryCall\x12/.grpc_gcp.continuous_load_testing.SimpleRequest\x1a0.grpc_gcp.continuous_load_testing.SimpleResponse\x12w\n" +
-	"\x12CacheableUnaryCall\x12/.grpc_gcp.continuous_load_testing.SimpleRequest\x1a0.grpc_gcp.continuous_load_testing.SimpleResponse\x12\x94\x01\n" +
-	"\x13StreamingOutputCall\x12<.grpc_gcp.continuous_load_testing.StreamingOutputCallRequest\x1a=.grpc_gcp.continuous_load_testing.StreamingOutputCallResponse0\x01\x12\x91\x01\n" +
-	"\x12StreamingInputCall\x12;.grpc_gcp.continuous_load_testing.StreamingInputCallRequest\x1a<.grpc_gcp.continuous_load_testing.StreamingInputCallResponse(\x01\x12\x91\x01\n" +
-	"\x0eFullDuplexCall\x12<.grpc_gcp.continuous_load_testing.StreamingOutputCallRequest\x1a=.grpc_gcp.continuous_load_testing.StreamingOutputCallResponse(\x010\x01\x12\x91\x01\n" +
-	"\x0eHalfDuplexCall\x12<.grpc_gcp.continuous_load_testing.StreamingOutputCallRequest\x1a=.grpc_gcp.continuous_load_testing.StreamingOutputCallResponse(\x010\x01\x12e\n" +
-	"\x11UnimplementedCall\x12'.grpc_gcp.continuous_load_testing.Empty\x1a'.grpc_gcp.continuous_load_testing.Empty\x12\x84\x01\n" +
-	"\x1bStreamedSequentialUnaryCall\x12/.grpc_gcp.continuous_load_testing.SimpleRequest\x1a0.grpc_gcp.continuous_load_testing.SimpleResponse(\x010\x01B0Z.continuous_load_testing/proto/grpc_gcp/testingb\x06proto3"
+	"\x1bgrpc_gcp/testing/test.proto\x12 grpc_gcp.continuous_load_testing\x1a\x1bgrpc/testing/messages.proto2k\n" +
+	"\vTestService\x12\\\n" +
+	"\x1bStreamedSequentialUnaryCall\x12\x1b.grpc.testing.SimpleRequest\x1a\x1c.grpc.testing.SimpleResponse(\x010\x01B0Z.continuous_load_testing/proto/grpc_gcp/testingb\x06proto3"
 
 var file_grpc_gcp_testing_test_proto_goTypes = []any{
-	(*empty.Empty)(nil),                          // 0: grpc_gcp.continuous_load_testing.Empty
-	(*messages.SimpleRequest)(nil),               // 1: grpc_gcp.continuous_load_testing.SimpleRequest
-	(*messages.StreamingOutputCallRequest)(nil),  // 2: grpc_gcp.continuous_load_testing.StreamingOutputCallRequest
-	(*messages.StreamingInputCallRequest)(nil),   // 3: grpc_gcp.continuous_load_testing.StreamingInputCallRequest
-	(*messages.SimpleResponse)(nil),              // 4: grpc_gcp.continuous_load_testing.SimpleResponse
-	(*messages.StreamingOutputCallResponse)(nil), // 5: grpc_gcp.continuous_load_testing.StreamingOutputCallResponse
-	(*messages.StreamingInputCallResponse)(nil),  // 6: grpc_gcp.continuous_load_testing.StreamingInputCallResponse
+	(*messages.SimpleRequest)(nil),  // 0: grpc.testing.SimpleRequest
+	(*messages.SimpleResponse)(nil), // 1: grpc.testing.SimpleResponse
 }
 var file_grpc_gcp_testing_test_proto_depIdxs = []int32{
-	0, // 0: grpc_gcp.continuous_load_testing.TestService.EmptyCall:input_type -> grpc_gcp.continuous_load_testing.Empty
-	1, // 1: grpc_gcp.continuous_load_testing.TestService.UnaryCall:input_type -> grpc_gcp.continuous_load_testing.SimpleRequest
-	1, // 2: grpc_gcp.continuous_load_testing.TestService.CacheableUnaryCall:input_type -> grpc_gcp.continuous_load_testing.SimpleRequest
-	2, // 3: grpc_gcp.continuous_load_testing.TestService.StreamingOutputCall:input_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallRequest
-	3, // 4: grpc_gcp.continuous_load_testing.TestService.StreamingInputCall:input_type -> grpc_gcp.continuous_load_testing.StreamingInputCallRequest
-	2, // 5: grpc_gcp.continuous_load_testing.TestService.FullDuplexCall:input_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallRequest
-	2, // 6: grpc_gcp.continuous_load_testing.TestService.HalfDuplexCall:input_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallRequest
-	0, // 7: grpc_gcp.continuous_load_testing.TestService.UnimplementedCall:input_type -> grpc_gcp.continuous_load_testing.Empty
-	1, // 8: grpc_gcp.continuous_load_testing.TestService.StreamedSequentialUnaryCall:input_type -> grpc_gcp.continuous_load_testing.SimpleRequest
-	0, // 9: grpc_gcp.continuous_load_testing.TestService.EmptyCall:output_type -> grpc_gcp.continuous_load_testing.Empty
-	4, // 10: grpc_gcp.continuous_load_testing.TestService.UnaryCall:output_type -> grpc_gcp.continuous_load_testing.SimpleResponse
-	4, // 11: grpc_gcp.continuous_load_testing.TestService.CacheableUnaryCall:output_type -> grpc_gcp.continuous_load_testing.SimpleResponse
-	5, // 12: grpc_gcp.continuous_load_testing.TestService.StreamingOutputCall:output_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallResponse
-	6, // 13: grpc_gcp.continuous_load_testing.TestService.StreamingInputCall:output_type -> grpc_gcp.continuous_load_testing.StreamingInputCallResponse
-	5, // 14: grpc_gcp.continuous_load_testing.TestService.FullDuplexCall:output_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallResponse
-	5, // 15: grpc_gcp.continuous_load_testing.TestService.HalfDuplexCall:output_type -> grpc_gcp.continuous_load_testing.StreamingOutputCallResponse
-	0, // 16: grpc_gcp.continuous_load_testing.TestService.UnimplementedCall:output_type -> grpc_gcp.continuous_load_testing.Empty
-	4, // 17: grpc_gcp.continuous_load_testing.TestService.StreamedSequentialUnaryCall:output_type -> grpc_gcp.continuous_load_testing.SimpleResponse
-	9, // [9:18] is the sub-list for method output_type
-	0, // [0:9] is the sub-list for method input_type
+	0, // 0: grpc_gcp.continuous_load_testing.TestService.StreamedSequentialUnaryCall:input_type -> grpc.testing.SimpleRequest
+	1, // 1: grpc_gcp.continuous_load_testing.TestService.StreamedSequentialUnaryCall:output_type -> grpc.testing.SimpleResponse
+	1, // [1:2] is the sub-list for method output_type
+	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name

@@ -1,7 +1,6 @@
 syntax = "proto3";
 
-import "grpc_gcp/testing/empty.proto";
-import "grpc_gcp/testing/messages.proto";
+import "grpc/testing/messages.proto";
 
 package grpc_gcp.continuous_load_testing;
 
@@ -11,47 +10,9 @@ option go_package = "continuous_load_testing/proto/grpc_gcp/testing";
 // A simple service to test the various types of RPCs and experiment with
 // performance with various types of payload.
 service TestService {
-  // One empty request followed by one empty response.
-  rpc EmptyCall(grpc_gcp.continuous_load_testing.Empty) returns (grpc_gcp.continuous_load_testing.Empty);
-
-  // One request followed by one response.
-  rpc UnaryCall(SimpleRequest) returns (SimpleResponse);
-
-  // One request followed by one response. Response has cache control
-  // headers set such that a caching HTTP proxy (such as GFE) can
-  // satisfy subsequent requests.
-  rpc CacheableUnaryCall(SimpleRequest) returns (SimpleResponse);
-
-  // One request followed by a sequence of responses (streamed download).
-  // The server returns the payload with client desired type and sizes.
-  rpc StreamingOutputCall(StreamingOutputCallRequest)
-    returns (stream StreamingOutputCallResponse);
-
-  // A sequence of requests followed by one response (streamed upload).
-  // The server returns the aggregated size of client payload as the result.
-  rpc StreamingInputCall(stream StreamingInputCallRequest)
-    returns (StreamingInputCallResponse);
-
-  // A sequence of requests with each request served by the server immediately.
-  // As one request could lead to multiple responses, this interface
-  // demonstrates the idea of full duplexing.
-  rpc FullDuplexCall(stream StreamingOutputCallRequest)
-    returns (stream StreamingOutputCallResponse);
-
-  // A sequence of requests followed by a sequence of responses.
-  // The server buffers all the client requests and then serves them in order. A
-  // stream of responses are returned to the client when the server starts with
-  // first request.
-  rpc HalfDuplexCall(stream StreamingOutputCallRequest)
-    returns (stream StreamingOutputCallResponse);
-
-  // The test server will not implement this method. It will be used
-  // to test the behavior when clients call unimplemented methods.
-  rpc UnimplementedCall(grpc_gcp.continuous_load_testing.Empty) returns (grpc_gcp.continuous_load_testing.Empty);
-
   // A bidirectional streaming RPC where messages are in sequence in the same bidi stream.
   // The client sends one request followed by one response.
   // This sequential message exchange over a bidi stream is used to benchmark
   // latency in Streamed Batching.
-  rpc StreamedSequentialUnaryCall(stream SimpleRequest) returns (stream SimpleResponse);
+  rpc StreamedSequentialUnaryCall(stream grpc.testing.SimpleRequest) returns (stream grpc.testing.SimpleResponse);
 }

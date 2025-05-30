@@ -8,8 +8,7 @@ package testing
 
 import (
 	context "context"
-	empty "continuous_load_testing/proto/grpc_gcp/testing/empty"
-	messages "continuous_load_testing/proto/grpc_gcp/testing/messages"
+	messages "continuous_load_testing/proto/grpc/testing/messages"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -21,14 +20,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TestService_EmptyCall_FullMethodName                   = "/grpc_gcp.continuous_load_testing.TestService/EmptyCall"
-	TestService_UnaryCall_FullMethodName                   = "/grpc_gcp.continuous_load_testing.TestService/UnaryCall"
-	TestService_CacheableUnaryCall_FullMethodName          = "/grpc_gcp.continuous_load_testing.TestService/CacheableUnaryCall"
-	TestService_StreamingOutputCall_FullMethodName         = "/grpc_gcp.continuous_load_testing.TestService/StreamingOutputCall"
-	TestService_StreamingInputCall_FullMethodName          = "/grpc_gcp.continuous_load_testing.TestService/StreamingInputCall"
-	TestService_FullDuplexCall_FullMethodName              = "/grpc_gcp.continuous_load_testing.TestService/FullDuplexCall"
-	TestService_HalfDuplexCall_FullMethodName              = "/grpc_gcp.continuous_load_testing.TestService/HalfDuplexCall"
-	TestService_UnimplementedCall_FullMethodName           = "/grpc_gcp.continuous_load_testing.TestService/UnimplementedCall"
 	TestService_StreamedSequentialUnaryCall_FullMethodName = "/grpc_gcp.continuous_load_testing.TestService/StreamedSequentialUnaryCall"
 )
 
@@ -39,33 +30,7 @@ const (
 // A simple service to test the various types of RPCs and experiment with
 // performance with various types of payload.
 type TestServiceClient interface {
-	// One empty request followed by one empty response.
-	EmptyCall(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*empty.Empty, error)
-	// One request followed by one response.
-	UnaryCall(ctx context.Context, in *messages.SimpleRequest, opts ...grpc.CallOption) (*messages.SimpleResponse, error)
-	// One request followed by one response. Response has cache control
-	// headers set such that a caching HTTP proxy (such as GFE) can
-	// satisfy subsequent requests.
-	CacheableUnaryCall(ctx context.Context, in *messages.SimpleRequest, opts ...grpc.CallOption) (*messages.SimpleResponse, error)
-	// One request followed by a sequence of responses (streamed download).
-	// The server returns the payload with client desired type and sizes.
-	StreamingOutputCall(ctx context.Context, in *messages.StreamingOutputCallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[messages.StreamingOutputCallResponse], error)
-	// A sequence of requests followed by one response (streamed upload).
-	// The server returns the aggregated size of client payload as the result.
-	StreamingInputCall(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse], error)
-	// A sequence of requests with each request served by the server immediately.
-	// As one request could lead to multiple responses, this interface
-	// demonstrates the idea of full duplexing.
-	FullDuplexCall(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse], error)
-	// A sequence of requests followed by a sequence of responses.
-	// The server buffers all the client requests and then serves them in order. A
-	// stream of responses are returned to the client when the server starts with
-	// first request.
-	HalfDuplexCall(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse], error)
-	// The test server will not implement this method. It will be used
-	// to test the behavior when clients call unimplemented methods.
-	UnimplementedCall(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*empty.Empty, error)
-	// A persistent bidirectional streaming RPC where messages are in sequence in the same bidi stream.
+	// A bidirectional streaming RPC where messages are in sequence in the same bidi stream.
 	// The client sends one request followed by one response.
 	// This sequential message exchange over a bidi stream is used to benchmark
 	// latency in Streamed Batching.
@@ -80,107 +45,9 @@ func NewTestServiceClient(cc grpc.ClientConnInterface) TestServiceClient {
 	return &testServiceClient{cc}
 }
 
-func (c *testServiceClient) EmptyCall(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*empty.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(empty.Empty)
-	err := c.cc.Invoke(ctx, TestService_EmptyCall_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *testServiceClient) UnaryCall(ctx context.Context, in *messages.SimpleRequest, opts ...grpc.CallOption) (*messages.SimpleResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(messages.SimpleResponse)
-	err := c.cc.Invoke(ctx, TestService_UnaryCall_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *testServiceClient) CacheableUnaryCall(ctx context.Context, in *messages.SimpleRequest, opts ...grpc.CallOption) (*messages.SimpleResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(messages.SimpleResponse)
-	err := c.cc.Invoke(ctx, TestService_CacheableUnaryCall_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *testServiceClient) StreamingOutputCall(ctx context.Context, in *messages.StreamingOutputCallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[messages.StreamingOutputCallResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[0], TestService_StreamingOutputCall_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_StreamingOutputCallClient = grpc.ServerStreamingClient[messages.StreamingOutputCallResponse]
-
-func (c *testServiceClient) StreamingInputCall(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[1], TestService_StreamingInputCall_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_StreamingInputCallClient = grpc.ClientStreamingClient[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]
-
-func (c *testServiceClient) FullDuplexCall(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[2], TestService_FullDuplexCall_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_FullDuplexCallClient = grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]
-
-func (c *testServiceClient) HalfDuplexCall(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[3], TestService_HalfDuplexCall_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_HalfDuplexCallClient = grpc.BidiStreamingClient[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]
-
-func (c *testServiceClient) UnimplementedCall(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*empty.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(empty.Empty)
-	err := c.cc.Invoke(ctx, TestService_UnimplementedCall_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *testServiceClient) StreamedSequentialUnaryCall(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[messages.SimpleRequest, messages.SimpleResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[4], TestService_StreamedSequentialUnaryCall_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[0], TestService_StreamedSequentialUnaryCall_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -198,33 +65,7 @@ type TestService_StreamedSequentialUnaryCallClient = grpc.BidiStreamingClient[me
 // A simple service to test the various types of RPCs and experiment with
 // performance with various types of payload.
 type TestServiceServer interface {
-	// One empty request followed by one empty response.
-	EmptyCall(context.Context, *empty.Empty) (*empty.Empty, error)
-	// One request followed by one response.
-	UnaryCall(context.Context, *messages.SimpleRequest) (*messages.SimpleResponse, error)
-	// One request followed by one response. Response has cache control
-	// headers set such that a caching HTTP proxy (such as GFE) can
-	// satisfy subsequent requests.
-	CacheableUnaryCall(context.Context, *messages.SimpleRequest) (*messages.SimpleResponse, error)
-	// One request followed by a sequence of responses (streamed download).
-	// The server returns the payload with client desired type and sizes.
-	StreamingOutputCall(*messages.StreamingOutputCallRequest, grpc.ServerStreamingServer[messages.StreamingOutputCallResponse]) error
-	// A sequence of requests followed by one response (streamed upload).
-	// The server returns the aggregated size of client payload as the result.
-	StreamingInputCall(grpc.ClientStreamingServer[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]) error
-	// A sequence of requests with each request served by the server immediately.
-	// As one request could lead to multiple responses, this interface
-	// demonstrates the idea of full duplexing.
-	FullDuplexCall(grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]) error
-	// A sequence of requests followed by a sequence of responses.
-	// The server buffers all the client requests and then serves them in order. A
-	// stream of responses are returned to the client when the server starts with
-	// first request.
-	HalfDuplexCall(grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]) error
-	// The test server will not implement this method. It will be used
-	// to test the behavior when clients call unimplemented methods.
-	UnimplementedCall(context.Context, *empty.Empty) (*empty.Empty, error)
-	// A persistent bidirectional streaming RPC where messages are in sequence in the same bidi stream.
+	// A bidirectional streaming RPC where messages are in sequence in the same bidi stream.
 	// The client sends one request followed by one response.
 	// This sequential message exchange over a bidi stream is used to benchmark
 	// latency in Streamed Batching.
@@ -239,30 +80,6 @@ type TestServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTestServiceServer struct{}
 
-func (UnimplementedTestServiceServer) EmptyCall(context.Context, *empty.Empty) (*empty.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EmptyCall not implemented")
-}
-func (UnimplementedTestServiceServer) UnaryCall(context.Context, *messages.SimpleRequest) (*messages.SimpleResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UnaryCall not implemented")
-}
-func (UnimplementedTestServiceServer) CacheableUnaryCall(context.Context, *messages.SimpleRequest) (*messages.SimpleResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CacheableUnaryCall not implemented")
-}
-func (UnimplementedTestServiceServer) StreamingOutputCall(*messages.StreamingOutputCallRequest, grpc.ServerStreamingServer[messages.StreamingOutputCallResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method StreamingOutputCall not implemented")
-}
-func (UnimplementedTestServiceServer) StreamingInputCall(grpc.ClientStreamingServer[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method StreamingInputCall not implemented")
-}
-func (UnimplementedTestServiceServer) FullDuplexCall(grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method FullDuplexCall not implemented")
-}
-func (UnimplementedTestServiceServer) HalfDuplexCall(grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method HalfDuplexCall not implemented")
-}
-func (UnimplementedTestServiceServer) UnimplementedCall(context.Context, *empty.Empty) (*empty.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UnimplementedCall not implemented")
-}
 func (UnimplementedTestServiceServer) StreamedSequentialUnaryCall(grpc.BidiStreamingServer[messages.SimpleRequest, messages.SimpleResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamedSequentialUnaryCall not implemented")
 }
@@ -287,110 +104,6 @@ func RegisterTestServiceServer(s grpc.ServiceRegistrar, srv TestServiceServer) {
 	s.RegisterService(&TestService_ServiceDesc, srv)
 }
 
-func _TestService_EmptyCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(empty.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TestServiceServer).EmptyCall(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TestService_EmptyCall_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TestServiceServer).EmptyCall(ctx, req.(*empty.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TestService_UnaryCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(messages.SimpleRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TestServiceServer).UnaryCall(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TestService_UnaryCall_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TestServiceServer).UnaryCall(ctx, req.(*messages.SimpleRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TestService_CacheableUnaryCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(messages.SimpleRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TestServiceServer).CacheableUnaryCall(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TestService_CacheableUnaryCall_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TestServiceServer).CacheableUnaryCall(ctx, req.(*messages.SimpleRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TestService_StreamingOutputCall_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(messages.StreamingOutputCallRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(TestServiceServer).StreamingOutputCall(m, &grpc.GenericServerStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_StreamingOutputCallServer = grpc.ServerStreamingServer[messages.StreamingOutputCallResponse]
-
-func _TestService_StreamingInputCall_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(TestServiceServer).StreamingInputCall(&grpc.GenericServerStream[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_StreamingInputCallServer = grpc.ClientStreamingServer[messages.StreamingInputCallRequest, messages.StreamingInputCallResponse]
-
-func _TestService_FullDuplexCall_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(TestServiceServer).FullDuplexCall(&grpc.GenericServerStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_FullDuplexCallServer = grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]
-
-func _TestService_HalfDuplexCall_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(TestServiceServer).HalfDuplexCall(&grpc.GenericServerStream[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TestService_HalfDuplexCallServer = grpc.BidiStreamingServer[messages.StreamingOutputCallRequest, messages.StreamingOutputCallResponse]
-
-func _TestService_UnimplementedCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(empty.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TestServiceServer).UnimplementedCall(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TestService_UnimplementedCall_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TestServiceServer).UnimplementedCall(ctx, req.(*empty.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _TestService_StreamedSequentialUnaryCall_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(TestServiceServer).StreamedSequentialUnaryCall(&grpc.GenericServerStream[messages.SimpleRequest, messages.SimpleResponse]{ServerStream: stream})
 }
@@ -404,47 +117,8 @@ type TestService_StreamedSequentialUnaryCallServer = grpc.BidiStreamingServer[me
 var TestService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "grpc_gcp.continuous_load_testing.TestService",
 	HandlerType: (*TestServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "EmptyCall",
-			Handler:    _TestService_EmptyCall_Handler,
-		},
-		{
-			MethodName: "UnaryCall",
-			Handler:    _TestService_UnaryCall_Handler,
-		},
-		{
-			MethodName: "CacheableUnaryCall",
-			Handler:    _TestService_CacheableUnaryCall_Handler,
-		},
-		{
-			MethodName: "UnimplementedCall",
-			Handler:    _TestService_UnimplementedCall_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "StreamingOutputCall",
-			Handler:       _TestService_StreamingOutputCall_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "StreamingInputCall",
-			Handler:       _TestService_StreamingInputCall_Handler,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "FullDuplexCall",
-			Handler:       _TestService_FullDuplexCall_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "HalfDuplexCall",
-			Handler:       _TestService_HalfDuplexCall_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
 		{
 			StreamName:    "StreamedSequentialUnaryCall",
 			Handler:       _TestService_StreamedSequentialUnaryCall_Handler,
