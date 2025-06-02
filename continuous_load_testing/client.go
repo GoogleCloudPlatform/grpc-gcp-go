@@ -295,22 +295,25 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 
 		for {
 			req := &messages.SimpleRequest{}
-			waitc := make(chan struct{})
+			var latency time.Duration
+			var recvErr error
+			var wg sync.WaitGroup
+			wg.Add(1)
 			go func() {
-				_, recvErr := stream.Recv()
-				close(waitc)
+				defer wg.Done()
+				_, recvErr = stream.Recv()
+				latency = time.Since(startTime)
 			}()
 			startTime := time.Now()
 			if err := stream.Send(req); err != nil {
 				log.Printf("Error sending on stream (discarding latency calculation): %v", err)
 				break
 			}
-			<-waitc
+			wg.Wait()
 			if recvErr != nil {
 				log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
 				break
 			}
-			latency := time.Since(startTime)
 			log.Printf("Round trip latency: %v", latency)
 		}
 		log.Println("Restarting stream after failure or completion.")
@@ -318,7 +321,7 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 }
 
 func main() {
-	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
+	log.Println("DirectPath Continuous Load Testing Client Started.")
 	log.Printf("Concurrency level: %d", *concurrency)
 	flag.Parse()
 	var serverAddr string
