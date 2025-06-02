@@ -285,38 +285,42 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 }
 
 func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
+	// Create the bidi streaming connection
+	var stream test.TestService_StreamedSequentialUnaryCallClient
+	var err error
 	for {
-		stream, err := tc.StreamedSequentialUnaryCall(ctx)
+		stream, err = tc.StreamedSequentialUnaryCall(ctx)
 		if err != nil {
 			log.Printf("Failed to create StreamedSequentialUnaryCall stream: %v. Retrying...", err)
 			continue
 		}
 		log.Println("StreamedSequentialUnaryCall stream established.")
-
-		for {
-			req := &messages.SimpleRequest{}
-			var recvErr error
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, recvErr = stream.Recv()
-			}()
-			startTime := time.Now()
-			if err := stream.Send(req); err != nil {
-				log.Printf("Error sending on stream (discarding latency calculation): %v", err)
-				break
-			}
-			wg.Wait()
-			if recvErr != nil {
-				log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
-				break
-			}
-			latency := time.Since(startTime)
-			log.Printf("Round trip latency: %v", latency)
-		}
-		log.Println("Restarting stream after failure or completion.")
+		break
 	}
+	// Send virtual rpcs over the established stream
+	for {
+		req := &messages.SimpleRequest{}
+		var recvErr error
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, recvErr = stream.Recv()
+		}()
+		startTime := time.Now()
+		if err := stream.Send(req); err != nil {
+			log.Printf("Error sending on stream (discarding latency calculation): %v", err)
+			break
+		}
+		wg.Wait()
+		if recvErr != nil {
+			log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
+			break
+		}
+		latency := time.Since(startTime)
+		log.Printf("Round trip latency: %v", latency)
+	}
+	log.Println("Restarting stream after failure or completion.")
 }
 
 func main() {
