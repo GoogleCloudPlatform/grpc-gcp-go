@@ -288,15 +288,10 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 	var stream test.TestService_StreamedSequentialUnaryCallClient
 	var err error
 	// Create the bidi streaming connection
-	for {
-		stream, err = tc.StreamedSequentialUnaryCall(ctx)
-		if err != nil {
-			log.Printf("Failed to create StreamedSequentialUnaryCall stream: %v. Retrying...", err)
-			continue
-		}
-		log.Println("StreamedSequentialUnaryCall stream established.")
-		break
+	for stream, err = tc.StreamedSequentialUnaryCall(ctx); err != nil; stream, err = tc.StreamedSequentialUnaryCall(ctx) {
+		log.Printf("Failed to create StreamedSequentialUnaryCall stream: %v. Retrying...", err)
 	}
+	log.Println("StreamedSequentialUnaryCall stream established.")
 	// Send virtual rpcs over the established stream
 	for {
 		req := &messages.SimpleRequest{}
