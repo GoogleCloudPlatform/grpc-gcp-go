@@ -285,9 +285,9 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 }
 
 func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
-	// Create the bidi streaming connection
 	var stream test.TestService_StreamedSequentialUnaryCallClient
 	var err error
+	// Create the bidi streaming connection
 	for {
 		stream, err = tc.StreamedSequentialUnaryCall(ctx)
 		if err != nil {
