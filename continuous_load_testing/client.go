@@ -294,20 +294,20 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 		log.Println("StreamedSequentialUnaryCall stream established.")
 
 		for {
-			_, err := stream.Recv()
-			if err != nil {
-				log.Printf("Error receiving from stream (discarding latency calculation): %v", err)
-				break
-			}
 			req := &messages.SimpleRequest{}
+			waitc := make(chan struct{})
+			go func() {
+				_, recvErr := stream.Recv()
+				close(waitc)
+			}()
 			startTime := time.Now()
 			if err := stream.Send(req); err != nil {
 				log.Printf("Error sending on stream (discarding latency calculation): %v", err)
 				break
 			}
-			_, err := stream.Recv()
-			if err != nil {
-				log.Printf("Error receiving from stream (discarding latency calculation): %v", err)
+			<-waitc
+			if recvErr != nil {
+				log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
 				break
 			}
 			latency := time.Since(startTime)
