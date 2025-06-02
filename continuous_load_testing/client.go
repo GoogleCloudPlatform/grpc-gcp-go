@@ -295,14 +295,12 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 
 		for {
 			req := &messages.SimpleRequest{}
-			var latency time.Duration
 			var recvErr error
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				_, recvErr = stream.Recv()
-				latency = time.Since(startTime)
 			}()
 			startTime := time.Now()
 			if err := stream.Send(req); err != nil {
@@ -314,6 +312,7 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 				log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
 				break
 			}
+			latency := time.Since(startTime)
 			log.Printf("Round trip latency: %v", latency)
 		}
 		log.Println("Restarting stream after failure or completion.")
