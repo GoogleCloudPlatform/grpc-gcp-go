@@ -24,9 +24,12 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/grpclb" // Register the grpclb load balancing policy.
 	_ "google.golang.org/grpc/balancer/rls"    // Register the RLS load balancing policy.
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/experimental/stats"
 	"google.golang.org/grpc/stats/opentelemetry"
+	"google.golang.org/grpc/status"
+
 	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS resolver required for c2p directpath.
 )
 
@@ -43,12 +46,13 @@ var (
 	disableDirectPath    = flag.Bool("disable_directpath", false, "If true, use CloudPath instead of DirectPath (default is false)")
 	methodsInput         = flag.String("methods", "", "Comma-separated list of methods to use (e.g., EmptyCall, UnaryCall)")
 	methods              = map[string]bool{
-		"EmptyCall":           false,
-		"UnaryCall":           false,
-		"StreamingInputCall":  false,
-		"StreamingOutputCall": false,
-		"FullDuplexCall":      false,
-		"HalfDuplexCall":      false,
+		"EmptyCall":                   false,
+		"UnaryCall":                   false,
+		"StreamingInputCall":          false,
+		"StreamingOutputCall":         false,
+		"FullDuplexCall":              false,
+		"HalfDuplexCall":              false,
+		"StreamedSequentialUnaryCall": false,
 	}
 )
 
@@ -150,6 +154,23 @@ func executeMethod(methodName string, methodFunc func(context.Context, test.Test
 				if err != nil {
 					log.Printf("Error executing %s #%d: %v", methodName, i, err)
 				}
+			}
+		}(i)
+	}
+}
+
+// executeBidiMethod launches multiple concurrent workers to run a bidirectional streaming benchmark method.
+// Unlike unary or streaming RPCs, each worker here continuously sends and receives messages
+// on a newly created stream. This function is used to benchmark bidirectional streaming virtual
+// gRPC calls like Steamed Batching.
+func executeBidiMethod(methodName string, methodFunc func(context.Context, test.TestServiceClient) error, stub test.TestServiceClient) {
+	log.Printf("Starting %d persistent bidi stream workers for latency benchmark: %s", *concurrency, methodName)
+	for i := 0; i < *concurrency; i++ {
+		go func(workerID int) {
+			ctx := context.Background()
+			log.Printf("Worker #%d: Starting %s", workerID, methodName)
+			if err := methodFunc(ctx, stub); err != nil {
+				log.Printf("Worker #%d: %s exited with error: %v", workerID, methodName, err)
 			}
 		}(i)
 	}
@@ -263,8 +284,45 @@ func ExecuteHalfDuplexCalls(ctx context.Context, tc test.TestServiceClient) erro
 	return nil
 }
 
+func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestServiceClient) error {
+	var stream test.TestService_StreamedSequentialUnaryCallClient
+	var err error
+	// Create the bidi streaming connection
+	for {
+		if stream, err = tc.StreamedSequentialUnaryCall(ctx); err == nil {
+			break
+		}
+		log.Printf("Failed to create StreamedSequentialUnaryCall stream: %v. Retrying...", err)
+	}
+	log.Println("StreamedSequentialUnaryCall stream established.")
+	// Send virtual rpcs over the established stream
+	for {
+		req := &messages.SimpleRequest{}
+		var recvErr error
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, recvErr = stream.Recv()
+		}()
+		startTime := time.Now()
+		if err := stream.Send(req); err != nil {
+			log.Printf("Error sending on stream (discarding latency calculation): %v", err)
+			break
+		}
+		wg.Wait()
+		if recvErr != nil {
+			log.Printf("Error receiving response from stream (discarding latency calculation): %v", recvErr)
+			break
+		}
+		latency := time.Since(startTime)
+		log.Printf("Round trip latency: %v", latency)
+	}
+	log.Println("Restarting stream after failure or completion.")
+}
+
 func main() {
-	log.Println("DirectPath Continuous Load Testing Client Started - test15.")
+	log.Println("DirectPath Continuous Load Testing Client Started.")
 	log.Printf("Concurrency level: %d", *concurrency)
 	flag.Parse()
 	var serverAddr string
@@ -328,6 +386,10 @@ func main() {
 	if methods["HalfDuplexCall"] {
 		go executeMethod("HalfDuplexCall", ExecuteHalfDuplexCalls, stub)
 		log.Println("HalfDuplexCall method started in background")
+	}
+	if methods["StreamedSequentialUnaryCall"] {
+		go executeBidiMethod("StreamedSequentialUnaryCall", ExecuteStreamedSequentialUnaryCall, stub)
+		log.Println("StreamedSequentialUnaryCall method started in background")
 	}
 	forever := make(chan struct{})
 	<-forever

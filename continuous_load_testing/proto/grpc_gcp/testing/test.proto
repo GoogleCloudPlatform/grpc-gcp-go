@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+import "grpc/testing/messages.proto";
+
+package grpc_gcp.continuous_load_testing;
+
+option go_package = "continuous_load_testing/proto/grpc_gcp/testing";
+
+
+// A simple service to test the various types of RPCs and experiment with
+// performance with various types of payload.
+service TestService {
+  // A bidirectional streaming RPC where messages are in sequence in the same bidi stream.
+  // The client sends one request followed by one response.
+  // This sequential message exchange over a bidi stream is used to benchmark
+  // latency in Streamed Batching.
+  rpc StreamedSequentialUnaryCall(stream grpc.testing.SimpleRequest) returns (stream grpc.testing.SimpleResponse);
+}
