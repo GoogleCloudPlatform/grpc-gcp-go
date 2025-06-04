@@ -1,4 +1,4 @@
-module continuous_load_testing
+module github.com/GoogleCloudPlatform/grpc-gcp-go/continuous_load_testing
 
 go 1.23
 
