@@ -11,10 +11,11 @@ import (
 	"sync"
 	"time"
 
-	empty "continuous_load_testing/proto/grpc/testing/empty"
-	test "continuous_load_testing/proto/grpc/testing/test"
+  empty "github.com/GoogleCloudPlatform/grpc-gcp-go/continuous_load_testing/proto/grpc_gcp/testing/empty"
+  test "github.com/GoogleCloudPlatform/grpc-gcp-go/continuous_load_testing/proto/grpc_gcp/testing/test"
+  messages "github.com/GoogleCloudPlatform/grpc-gcp-go/continuous_load_testing/proto/grpc_gcp/testing/messages"
 
-	"continuous_load_testing/proto/grpc/testing/messages"
+
 	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	"go.opentelemetry.io/contrib/detectors/gcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -24,11 +25,9 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/grpclb" // Register the grpclb load balancing policy.
 	_ "google.golang.org/grpc/balancer/rls"    // Register the RLS load balancing policy.
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/google"
 	"google.golang.org/grpc/experimental/stats"
 	"google.golang.org/grpc/stats/opentelemetry"
-	"google.golang.org/grpc/status"
 
 	_ "google.golang.org/grpc/xds/googledirectpath" // Register xDS resolver required for c2p directpath.
 )
@@ -319,6 +318,7 @@ func ExecuteStreamedSequentialUnaryCall(ctx context.Context, tc test.TestService
 		log.Printf("Round trip latency: %v", latency)
 	}
 	log.Println("Restarting stream after failure or completion.")
+	return err
 }
 
 func main() {
