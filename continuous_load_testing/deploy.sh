@@ -8,8 +8,6 @@ echo $ROOT_DIR
 go generate && go build
 kubectl delete deployment client-go-manual
 docker system prune -af
-#docker build --progress=plain --no-cache -t directpathgrpctesting-client-go-manual .
-# Removed the --progress=plain flag from the build command.
 docker build --no-cache -t directpathgrpctesting-client-go-manual .
 docker tag directpathgrpctesting-client-go-manual us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-manual
 gcloud artifacts docker images delete us-docker.pkg.dev/directpathgrpctesting-client/directpathgrpctesting-client/directpathgrpctesting-client-go-manual --delete-tags -q
