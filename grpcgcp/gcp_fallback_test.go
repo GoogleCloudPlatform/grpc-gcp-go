@@ -26,6 +26,10 @@ import (
 
 	"github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp/mocks"
 	"github.com/golang/mock/gomock"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata/metricdatatest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -117,7 +121,7 @@ func TestGCPFallback_FallbackHappens(t *testing.T) {
 
 	expectUnary(t, fallbackConn, codes.OK)
 	if err := gcpFallback.Invoke(context.Background(), "method", nil, nil); err != nil {
-		t.Errorf("Invoke() on fallback connection failed: %v", err)
+		t.Errorf("Invoke() on gcpFallback failed: %v", err)
 	}
 }
 
@@ -215,4 +219,171 @@ func TestGCPFallback_NoFallback_DifferentErrorCode(t *testing.T) {
 	// Should still use primary.
 	expectUnary(t, primaryConn, codes.OK).Times(1)
 	gcpFallback.Invoke(context.Background(), "method", nil, nil)
+}
+
+func metricsDataFromReader(ctx context.Context, t *testing.T, reader *metric.ManualReader) map[string]metricdata.Metrics {
+	t.Helper()
+	rm := &metricdata.ResourceMetrics{}
+	if err := reader.Collect(ctx, rm); err != nil {
+		t.Fatalf("reader.Collect() error = %v", err)
+	}
+	gotMetrics := map[string]metricdata.Metrics{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			gotMetrics[m.Name] = m
+		}
+	}
+	return gotMetrics
+}
+
+func TestGCPFallback_Metrics(t *testing.T) {
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+
+	opts := NewGCPFallbackOptions()
+	opts.Period = 10 * time.Millisecond
+	opts.ErrorRateThreshold = 0.5
+	opts.MinFailedCalls = 2
+	opts.MeterProvider = provider
+
+	ctrl, gcpFallback, primaryConn, fallbackConn := setup(t, opts)
+
+	// 2 failures, 1 success. Rate = 2/3 = 0.66 >= 0.5. Failures = 2 >= 2.
+	// Fallback should be triggered.
+	expectUnary(t, primaryConn, codes.Unavailable).Times(1)
+	ctrl.expectStreaming(t, primaryConn, codes.Unavailable).Times(1)
+	expectUnary(t, primaryConn, codes.OK).Times(1)
+
+	gcpFallback.Invoke(context.Background(), "method", nil, nil)
+	s, err := gcpFallback.NewStream(context.Background(), nil, "method")
+	if err != nil {
+		t.Fatalf("NewStream() error = %v", err)
+	}
+	s.RecvMsg(nil) // This will trigger the result.
+	gcpFallback.Invoke(context.Background(), "method", nil, nil)
+
+	wantMetrics := []metricdata.Metrics{
+		{
+			Name:        "eef.call_status",
+			Description: "Number of calls with a status and channel.",
+			Unit:        "{call}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("status_code", "Unavailable"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("status_code", "OK"))},
+				},
+				IsMonotonic: true,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+		{
+			Name:        "eef.current_channel",
+			Description: "1 for currently active channel, 0 otherwise.",
+			Unit:        "{channel}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"))},
+					{Value: 0, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"))},
+				},
+				IsMonotonic: false,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+	}
+
+	dontWantMetrics := []string{
+		"eef.fallback_count",
+		"eef.error_ratio",
+	}
+
+	// Read metrics before fallback.
+	gotMetrics := metricsDataFromReader(context.Background(), t, reader)
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+	for _, metricName := range dontWantMetrics {
+		if _, ok := gotMetrics[metricName]; ok {
+			t.Fatalf("Metric %v should not be present in recorded metrics", metricName)
+		}
+	}
+
+	// Wait for rate check to trigger fallback.
+	time.Sleep(18 * time.Millisecond)
+
+	// Fallback should be used.
+	expectUnary(t, fallbackConn, codes.OK)
+	if err := gcpFallback.Invoke(context.Background(), "method", nil, nil); err != nil {
+		t.Errorf("Invoke() on gcpFallback failed: %v", err)
+	}
+
+	wantMetrics = []metricdata.Metrics{
+		{
+			Name:        "eef.call_status",
+			Description: "Number of calls with a status and channel.",
+			Unit:        "{call}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("status_code", "Unavailable"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("status_code", "OK"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("status_code", "OK"))},
+				},
+				IsMonotonic: true,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+		{
+			Name:        "eef.current_channel",
+			Description: "1 for currently active channel, 0 otherwise.",
+			Unit:        "{channel}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 0, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"))},
+				},
+				IsMonotonic: false,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+		{
+			Name:        "eef.fallback_count",
+			Description: "Number of fallbacks occurred from one channel to another.",
+			Unit:        "{occurrence}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("from_channel_name", "primary"), attribute.String("to_channel_name", "fallback"))},
+				},
+				IsMonotonic: true,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+		{
+			Name:        "eef.error_ratio",
+			Description: "Ratio of failed calls to total calls for a channel.",
+			Unit:        "1",
+			Data: metricdata.Gauge[float64]{
+				DataPoints: []metricdata.DataPoint[float64]{
+					{Value: float64(float32(2) / float32(3)), Attributes: attribute.NewSet(attribute.String("channel_name", "primary"))},
+					{Value: 0, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"))},
+				},
+			},
+		},
+	}
+
+	// Read metrics after fallback.
+	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
 }
