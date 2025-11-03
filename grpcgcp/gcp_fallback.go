@@ -344,6 +344,10 @@ func (f *GCPFallback) rateCheck() {
 }
 
 func (f *GCPFallback) probePrimary() {
+	if !f.isInFallback.Load() {
+		return
+	}
+
 	result := f.primaryProbingFn(f.primaryConn)
 	if result == "" {
 		f.primaryDownSince = time.Time{}

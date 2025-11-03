@@ -392,7 +392,7 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
 
-	primaryResults := []string{"", "Unavailable", "Unavailable", ""}
+	primaryResults := []string{"Unavailable", "Unavailable", ""}
 	fallbackResults := []string{"Internal", "Unavailable", "", ""}
 	primaryIndex := 0
 	fallbackIndex := 0
@@ -408,11 +408,12 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 		fallbackIndex++
 		return res
 	}
+	opts.Period = 2 * time.Millisecond
 	opts.PrimaryProbingInterval = 10 * time.Millisecond
 	opts.FallbackProbingInterval = 10 * time.Millisecond
 	opts.MeterProvider = provider
 
-	setup(t, opts)
+	_, gcpFallback, primaryConn, _ := setup(t, opts)
 
 	wantMetrics := []metricdata.Metrics{
 		{
@@ -441,8 +442,11 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 		}
 	}
 
-	// Wait for the first probing.
+	// Wait for the first probing. This probing should happen only for the fallback channel as we don't probe primary until fallback happens.
 	time.Sleep(15 * time.Millisecond)
+	if primaryIndex != 0 {
+		t.Fatalf("Primary probe count before fallback must be 0, got: %d", primaryIndex)
+	}
 
 	// Read metrics after the first probing.
 	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
@@ -467,8 +471,20 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 		}
 	}
 
-	// Wait for the second probing.
+	// Initiate a fallback.
+	expectUnary(t, primaryConn, codes.Unavailable).Times(3)
+	for range 3 {
+		gcpFallback.Invoke(context.Background(), "method", nil, nil)
+	}
+
+	// Wait for the second probing. This time both primary and fallback should be probed.
 	time.Sleep(10 * time.Millisecond)
+	if primaryIndex != 1 {
+		t.Fatalf("Primary probe count after fallback must be 1, got: %d", primaryIndex)
+	}
+	if fallbackIndex != 2 {
+		t.Fatalf("Fallback probe count after fallback must be 2, got: %d", fallbackIndex)
+	}
 
 	// Read metrics after the second probing.
 	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
@@ -543,7 +559,7 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 			Unit:        "{result}",
 			Data: metricdata.Sum[int64]{
 				DataPoints: []metricdata.DataPoint[int64]{
-					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("result", ""))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("result", ""))},
 					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("result", "Unavailable"))},
 					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("result", "Internal"))},
 					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("result", "Unavailable"))},
