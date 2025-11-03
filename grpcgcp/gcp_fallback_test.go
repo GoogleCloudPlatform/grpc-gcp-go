@@ -314,7 +314,7 @@ func TestGCPFallback_Metrics(t *testing.T) {
 	}
 
 	// Wait for rate check to trigger fallback.
-	time.Sleep(18 * time.Millisecond)
+	time.Sleep(12 * time.Millisecond)
 
 	// Fallback should be used.
 	expectUnary(t, fallbackConn, codes.OK)
@@ -377,6 +377,183 @@ func TestGCPFallback_Metrics(t *testing.T) {
 
 	// Read metrics after fallback.
 	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+}
+
+func TestGCPFallback_ProbeMetrics(t *testing.T) {
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+
+	primaryResults := []string{"", "Unavailable", "Unavailable", ""}
+	fallbackResults := []string{"Internal", "Unavailable", "", ""}
+	primaryIndex := 0
+	fallbackIndex := 0
+
+	opts := NewGCPFallbackOptions()
+	opts.PrimaryProbingFn = func(cci grpc.ClientConnInterface) string {
+		res := primaryResults[primaryIndex]
+		primaryIndex++
+		return res
+	}
+	opts.FallbackProbingFn = func(cci grpc.ClientConnInterface) string {
+		res := fallbackResults[fallbackIndex]
+		fallbackIndex++
+		return res
+	}
+	opts.PrimaryProbingInterval = 10 * time.Millisecond
+	opts.FallbackProbingInterval = 10 * time.Millisecond
+	opts.MeterProvider = provider
+
+	setup(t, opts)
+
+	wantMetrics := []metricdata.Metrics{
+		{
+			Name:        "eef.channel_downtime",
+			Description: "How many consecutive seconds probing fails for the channel.",
+			Unit:        "s",
+			Data: metricdata.Gauge[float64]{
+				DataPoints: []metricdata.DataPoint[float64]{
+					{Value: 0, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"))},
+					{Value: 0, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"))},
+				},
+			},
+		},
+	}
+
+	// Read metrics before probing.
+	gotMetrics := metricsDataFromReader(context.Background(), t, reader)
+	// Verify metrics with values.
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+
+	// Wait for the first probing.
+	time.Sleep(15 * time.Millisecond)
+
+	// Read metrics after the first probing.
+	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	// Verify metrics exist.
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars(), metricdatatest.IgnoreValue()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+	// Verify values.
+	for _, dp := range gotMetrics["eef.channel_downtime"].Data.(metricdata.Gauge[float64]).DataPoints {
+		cn, _ := dp.Attributes.Value(attribute.Key("channel_name"))
+		if cn == attribute.String("channel_name", "primary").Value && dp.Value != 0 {
+			t.Errorf("Primary channel downtime after first probe must be 0, got: %f", dp.Value)
+		}
+		if cn == attribute.String("channel_name", "fallback").Value && (dp.Value < 0.002 || dp.Value > 0.008) {
+			t.Errorf("Fallback channel downtime after first probe must be within 0.002-0.008, got: %f", dp.Value)
+		}
+	}
+
+	// Wait for the second probing.
+	time.Sleep(10 * time.Millisecond)
+
+	// Read metrics after the second probing.
+	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	// Verify metrics exist.
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars(), metricdatatest.IgnoreValue()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+	// Verify values.
+	for _, dp := range gotMetrics["eef.channel_downtime"].Data.(metricdata.Gauge[float64]).DataPoints {
+		cn, _ := dp.Attributes.Value(attribute.Key("channel_name"))
+		if cn == attribute.String("channel_name", "primary").Value && (dp.Value < 0.002 || dp.Value > 0.008) {
+			t.Errorf("Primary channel downtime after second probe must be within 0.002-0.008, got: %f", dp.Value)
+		}
+		if cn == attribute.String("channel_name", "fallback").Value && (dp.Value < 0.012 || dp.Value > 0.018) {
+			t.Errorf("Fallback channel downtime after second probe must be within 0.012-0.018, got: %f", dp.Value)
+		}
+	}
+
+	// Wait for the third probing.
+	time.Sleep(10 * time.Millisecond)
+
+	// Read metrics after the third probing.
+	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	// Verify metrics exist.
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars(), metricdatatest.IgnoreValue()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+	// Verify values.
+	for _, dp := range gotMetrics["eef.channel_downtime"].Data.(metricdata.Gauge[float64]).DataPoints {
+		cn, _ := dp.Attributes.Value(attribute.Key("channel_name"))
+		if cn == attribute.String("channel_name", "primary").Value && (dp.Value < 0.012 || dp.Value > 0.018) {
+			t.Errorf("Primary channel downtime after second probe must be within 0.012-0.018, got: %f", dp.Value)
+		}
+		if cn == attribute.String("channel_name", "fallback").Value && dp.Value != 0 {
+			t.Errorf("Fallback channel downtime after second probe must be 0, got: %f", dp.Value)
+		}
+	}
+
+	// Wait for the fourth probing.
+	time.Sleep(10 * time.Millisecond)
+
+	// Read metrics after the fourth probing.
+	gotMetrics = metricsDataFromReader(context.Background(), t, reader)
+	// Verify metrics with values.
+	for _, metric := range wantMetrics {
+		val, ok := gotMetrics[metric.Name]
+		if !ok {
+			t.Fatalf("Metric %v not present in recorded metrics", metric.Name)
+		}
+		if !metricdatatest.AssertEqual(t, metric, val, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars()) {
+			t.Fatalf("Metrics data type not equal for metric: %v", metric.Name)
+		}
+	}
+
+	// Verify probe results metric.
+	wantMetrics = []metricdata.Metrics{
+		{
+			Name:        "eef.probe_result",
+			Description: "Results of probing functions execution.",
+			Unit:        "{result}",
+			Data: metricdata.Sum[int64]{
+				DataPoints: []metricdata.DataPoint[int64]{
+					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("result", ""))},
+					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "primary"), attribute.String("result", "Unavailable"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("result", "Internal"))},
+					{Value: 1, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("result", "Unavailable"))},
+					{Value: 2, Attributes: attribute.NewSet(attribute.String("channel_name", "fallback"), attribute.String("result", ""))},
+				},
+				IsMonotonic: true,
+				Temporality: metricdata.CumulativeTemporality,
+			},
+		},
+	}
 	for _, metric := range wantMetrics {
 		val, ok := gotMetrics[metric.Name]
 		if !ok {

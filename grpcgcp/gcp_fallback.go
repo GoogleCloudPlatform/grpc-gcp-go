@@ -53,6 +53,8 @@ type GCPFallback struct {
 	fallbackProbingFn   GCPFallbackProbeFn
 	primaryChannelName  string
 	fallbackChannelName string
+	primaryDownSince    time.Time
+	fallbackDownSince   time.Time
 
 	rateCheckTicker     *time.Ticker
 	rateCheckDone       chan (struct{})
@@ -64,11 +66,13 @@ type GCPFallback struct {
 	shutdown *atomic.Bool
 
 	// OpenTelemetry metrics.
-	meter          metric.Meter
-	currentChannel metric.Int64ObservableUpDownCounter
-	fallbackCount  metric.Int64Counter
-	callStatus     metric.Int64Counter
-	errorRatio     metric.Float64Gauge
+	meter           metric.Meter
+	currentChannel  metric.Int64ObservableUpDownCounter
+	fallbackCount   metric.Int64Counter
+	callStatus      metric.Int64Counter
+	errorRatio      metric.Float64Gauge
+	probeResult     metric.Int64Counter
+	channelDowntime metric.Float64ObservableGauge
 }
 
 // GCPFallbackProbeFn defines the function signature for probing a gRPC connection.
@@ -242,6 +246,47 @@ func (f *GCPFallback) initMetrics() error {
 		metric.WithDescription("Ratio of failed calls to total calls for a channel."),
 		metric.WithUnit("1"),
 	)
+	if err != nil {
+		return err
+	}
+	f.probeResult, err = f.meter.Int64Counter(
+		"eef.probe_result",
+		metric.WithDescription("Results of probing functions execution."),
+		metric.WithUnit("{result}"),
+	)
+	if err != nil {
+		return err
+	}
+	f.channelDowntime, err = f.meter.Float64ObservableGauge(
+		"eef.channel_downtime",
+		metric.WithDescription("How many consecutive seconds probing fails for the channel."),
+		metric.WithUnit("s"),
+		metric.WithFloat64Callback(func(ctx context.Context, io metric.Float64Observer) error {
+			if f.primaryDownSince.IsZero() {
+				io.Observe(
+					0,
+					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}),
+				)
+			} else {
+				io.Observe(
+					time.Since(f.primaryDownSince).Seconds(),
+					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}),
+				)
+			}
+			if f.fallbackDownSince.IsZero() {
+				io.Observe(
+					0,
+					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}),
+				)
+			} else {
+				io.Observe(
+					time.Since(f.fallbackDownSince).Seconds(),
+					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}),
+				)
+			}
+			return nil
+		}),
+	)
 
 	return err
 }
@@ -288,11 +333,27 @@ func (f *GCPFallback) rateCheck() {
 }
 
 func (f *GCPFallback) probePrimary() {
-	// TODO: probe and report result.
+	result := f.primaryProbingFn(f.primaryConn)
+	if result == "" {
+		f.primaryDownSince = time.Time{}
+	} else if f.primaryDownSince.IsZero() {
+		f.primaryDownSince = time.Now()
+	}
+	if f.probeResult != nil {
+		f.probeResult.Add(context.Background(), 1, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName), attribute.String("result", result)))
+	}
 }
 
 func (f *GCPFallback) probeFallback() {
-	// TODO: probe and report result.
+	result := f.fallbackProbingFn(f.fallbackConn)
+	if result == "" {
+		f.fallbackDownSince = time.Time{}
+	} else if f.fallbackDownSince.IsZero() {
+		f.fallbackDownSince = time.Now()
+	}
+	if f.probeResult != nil {
+		f.probeResult.Add(context.Background(), 1, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName), attribute.String("result", result)))
+	}
 }
 
 // Close stops all the background goroutines and releases resources.
@@ -306,7 +367,7 @@ func (f *GCPFallback) Close() {
 
 	if f.primaryProbeTicker != nil {
 		f.primaryProbeTicker.Stop()
-		close(f.fallbackProbeDone)
+		close(f.primaryProbeDone)
 	}
 
 	if f.fallbackProbeTicker != nil {
