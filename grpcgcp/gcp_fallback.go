@@ -37,6 +37,9 @@ import (
 type GCPFallback struct {
 	grpc.ClientConnInterface
 
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	primaryConn       grpc.ClientConnInterface
 	fallbackConn      grpc.ClientConnInterface
 	isInFallback      *atomic.Bool
@@ -56,44 +59,51 @@ type GCPFallback struct {
 	primaryDownSince    time.Time
 	fallbackDownSince   time.Time
 
-	rateCheckTicker     *time.Ticker
-	rateCheckDone       chan (struct{})
-	primaryProbeTicker  *time.Ticker
-	primaryProbeDone    chan (struct{})
-	fallbackProbeTicker *time.Ticker
-	fallbackProbeDone   chan (struct{})
-
-	shutdown *atomic.Bool
-
 	// OpenTelemetry metrics.
-	meter           metric.Meter
-	currentChannel  metric.Int64ObservableUpDownCounter
-	fallbackCount   metric.Int64Counter
-	callStatus      metric.Int64Counter
-	errorRatio      metric.Float64Gauge
-	probeResult     metric.Int64Counter
-	channelDowntime metric.Float64ObservableGauge
+	meter                metric.Meter
+	currentChCounter     metric.Int64ObservableUpDownCounter
+	fallbackCounter      metric.Int64Counter
+	callCounter          metric.Int64Counter
+	errorRatioGauge      metric.Float64Gauge
+	probeResultCounter   metric.Int64Counter
+	channelDowntimeGauge metric.Float64ObservableGauge
 }
 
-// GCPFallbackProbeFn defines the function signature for probing a gRPC connection.
-// It should return a string indicating the result of the probe.
+// Make sure GCPFallback implements grpc.ClientConnInterface.
+var _ grpc.ClientConnInterface = (*GCPFallback)(nil)
+
+// GCPFallbackProbeFn defines the function signature for probing a gRPC
+// connection.
+// It should return a string indicating the result of the probe. Empty
+// string means the probe was successful.
 type GCPFallbackProbeFn func(grpc.ClientConnInterface) string
 
 // GCPFallbackOptions holds the configuration for the GCPFallback mechanism.
 type GCPFallbackOptions struct {
-	EnableFallback     bool
+	// EnableFallback controls whether the fallback mechanism is enabled.
+	EnableFallback bool
+	// ErrorRateThreshold is the threshold for the error rate of the primary connection.
 	ErrorRateThreshold float32
-	ErroneousCodes     []codes.Code
-	Period             time.Duration
-	MinFailedCalls     int
+	// ErroneousCodes is a list of error codes that are considered erroneous.
+	ErroneousCodes []codes.Code
+	// Period is the interval at which the error rate is checked.
+	Period time.Duration
+	// MinFailedCalls is the minimum number of failed calls since last check.
+	MinFailedCalls int
 
-	PrimaryProbingFn  GCPFallbackProbeFn
+	// PrimaryProbingFn is the probing function for the primary connection.
+	PrimaryProbingFn GCPFallbackProbeFn
+	// FallbackProbingFn is the probing function for the fallback connection.
 	FallbackProbingFn GCPFallbackProbeFn
 
-	PrimaryProbingInterval  time.Duration
+	// PrimaryProbingInterval is the interval at which the primary connection is probed.
+	PrimaryProbingInterval time.Duration
+	// FallbackProbingInterval is the interval at which the fallback connection is probed.
 	FallbackProbingInterval time.Duration
 
-	PrimaryChannelName  string
+	// PrimaryChannelName is the name of the primary channel.
+	PrimaryChannelName string
+	// FallbackChannelName is the name of the fallback channel.
 	FallbackChannelName string
 
 	// MeterProvider is the OpenTelemetry meter provider.
@@ -115,19 +125,23 @@ func NewGCPFallbackOptions() *GCPFallbackOptions {
 	}
 }
 
-// Make sure GCPFallback implements grpc.ClientConnInterface.
-var _ grpc.ClientConnInterface = (*GCPFallback)(nil)
-
 // NewGCPFallback creates a new GCPFallback instance. It takes a primary and a
 // fallback connection, along with options to configure the fallback behavior.
-func NewGCPFallback(primaryConn grpc.ClientConnInterface, fallbackConn grpc.ClientConnInterface, fallbackOpts *GCPFallbackOptions) (*GCPFallback, error) {
+// GCPFallback will not close the provided connections because Close is not
+// a part of ClientConnInterface, thus the caller is responsible for closing
+// them properly.
+func NewGCPFallback(ctx context.Context, primaryConn grpc.ClientConnInterface, fallbackConn grpc.ClientConnInterface, fallbackOpts *GCPFallbackOptions) (*GCPFallback, error) {
 
 	errCodes := make(map[codes.Code]struct{})
 	for _, c := range fallbackOpts.ErroneousCodes {
 		errCodes[c] = struct{}{}
 	}
 
+	fallbackCtx, cancel := context.WithCancel(ctx)
+
 	gcpFallback := &GCPFallback{
+		ctx:               fallbackCtx,
+		cancel:            cancel,
 		primaryConn:       primaryConn,
 		fallbackConn:      fallbackConn,
 		isInFallback:      &atomic.Bool{},
@@ -146,8 +160,6 @@ func NewGCPFallback(primaryConn grpc.ClientConnInterface, fallbackConn grpc.Clie
 
 		primaryChannelName:  fallbackOpts.PrimaryChannelName,
 		fallbackChannelName: fallbackOpts.FallbackChannelName,
-
-		shutdown: &atomic.Bool{},
 	}
 
 	if fallbackOpts.MeterProvider != nil {
@@ -157,29 +169,28 @@ func NewGCPFallback(primaryConn grpc.ClientConnInterface, fallbackConn grpc.Clie
 		}
 	}
 
-	gcpFallback.rateCheckDone = make(chan struct{})
-	gcpFallback.rateCheckTicker = time.NewTicker(fallbackOpts.Period)
 	go func() {
+		ticker := time.NewTicker(fallbackOpts.Period)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-gcpFallback.rateCheckDone:
+			case <-gcpFallback.ctx.Done():
 				return
-			case <-gcpFallback.rateCheckTicker.C:
+			case <-ticker.C:
 				gcpFallback.rateCheck()
 			}
 		}
 	}()
 
 	if fallbackOpts.PrimaryProbingFn != nil {
-		gcpFallback.primaryProbeDone = make(chan struct{})
-		gcpFallback.primaryProbeTicker = time.NewTicker(fallbackOpts.PrimaryProbingInterval)
-
 		go func() {
+			ticker := time.NewTicker(fallbackOpts.PrimaryProbingInterval)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-gcpFallback.primaryProbeDone:
+				case <-gcpFallback.ctx.Done():
 					return
-				case <-gcpFallback.primaryProbeTicker.C:
+				case <-ticker.C:
 					gcpFallback.probePrimary()
 				}
 			}
@@ -187,15 +198,14 @@ func NewGCPFallback(primaryConn grpc.ClientConnInterface, fallbackConn grpc.Clie
 	}
 
 	if fallbackOpts.FallbackProbingFn != nil {
-		gcpFallback.fallbackProbeDone = make(chan struct{})
-		gcpFallback.fallbackProbeTicker = time.NewTicker(fallbackOpts.FallbackProbingInterval)
-
 		go func() {
+			ticker := time.NewTicker(fallbackOpts.FallbackProbingInterval)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-gcpFallback.fallbackProbeDone:
+				case <-gcpFallback.ctx.Done():
 					return
-				case <-gcpFallback.fallbackProbeTicker.C:
+				case <-ticker.C:
 					gcpFallback.probeFallback()
 				}
 			}
@@ -207,17 +217,17 @@ func NewGCPFallback(primaryConn grpc.ClientConnInterface, fallbackConn grpc.Clie
 
 func (f *GCPFallback) initMetrics() error {
 	var err error
-	f.currentChannel, err = f.meter.Int64ObservableUpDownCounter(
+	f.currentChCounter, err = f.meter.Int64ObservableUpDownCounter(
 		"eef.current_channel",
 		metric.WithDescription("1 for currently active channel, 0 otherwise."),
 		metric.WithUnit("{channel}"),
 		metric.WithInt64Callback(func(ctx context.Context, io metric.Int64Observer) error {
 			if f.isInFallback.Load() {
-				io.Observe(0, metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}))
-				io.Observe(1, metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}))
+				io.Observe(0, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)))
+				io.Observe(1, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)))
 			} else {
-				io.Observe(1, metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}))
-				io.Observe(0, metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}))
+				io.Observe(1, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)))
+				io.Observe(0, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)))
 			}
 			return nil
 		}),
@@ -225,7 +235,7 @@ func (f *GCPFallback) initMetrics() error {
 	if err != nil {
 		return err
 	}
-	f.fallbackCount, err = f.meter.Int64Counter(
+	f.fallbackCounter, err = f.meter.Int64Counter(
 		"eef.fallback_count",
 		metric.WithDescription("Number of fallbacks occurred from one channel to another."),
 		metric.WithUnit("{occurrence}"),
@@ -233,7 +243,7 @@ func (f *GCPFallback) initMetrics() error {
 	if err != nil {
 		return err
 	}
-	f.callStatus, err = f.meter.Int64Counter(
+	f.callCounter, err = f.meter.Int64Counter(
 		"eef.call_status",
 		metric.WithDescription("Number of calls with a status and channel."),
 		metric.WithUnit("{call}"),
@@ -241,7 +251,7 @@ func (f *GCPFallback) initMetrics() error {
 	if err != nil {
 		return err
 	}
-	f.errorRatio, err = f.meter.Float64Gauge(
+	f.errorRatioGauge, err = f.meter.Float64Gauge(
 		"eef.error_ratio",
 		metric.WithDescription("Ratio of failed calls to total calls for a channel."),
 		metric.WithUnit("1"),
@@ -249,7 +259,7 @@ func (f *GCPFallback) initMetrics() error {
 	if err != nil {
 		return err
 	}
-	f.probeResult, err = f.meter.Int64Counter(
+	f.probeResultCounter, err = f.meter.Int64Counter(
 		"eef.probe_result",
 		metric.WithDescription("Results of probing functions execution."),
 		metric.WithUnit("{result}"),
@@ -257,7 +267,7 @@ func (f *GCPFallback) initMetrics() error {
 	if err != nil {
 		return err
 	}
-	f.channelDowntime, err = f.meter.Float64ObservableGauge(
+	f.channelDowntimeGauge, err = f.meter.Float64ObservableGauge(
 		"eef.channel_downtime",
 		metric.WithDescription("How many consecutive seconds probing fails for the channel."),
 		metric.WithUnit("s"),
@@ -265,23 +275,23 @@ func (f *GCPFallback) initMetrics() error {
 			if f.primaryDownSince.IsZero() {
 				io.Observe(
 					0,
-					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}),
+					metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)),
 				)
 			} else {
 				io.Observe(
 					time.Since(f.primaryDownSince).Seconds(),
-					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.primaryChannelName)}),
+					metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)),
 				)
 			}
 			if f.fallbackDownSince.IsZero() {
 				io.Observe(
 					0,
-					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}),
+					metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)),
 				)
 			} else {
 				io.Observe(
 					time.Since(f.fallbackDownSince).Seconds(),
-					metric.WithAttributes(attribute.KeyValue{Key: "channel_name", Value: attribute.StringValue(f.fallbackChannelName)}),
+					metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)),
 				)
 			}
 			return nil
@@ -296,11 +306,11 @@ func (f *GCPFallback) rateCheck() {
 	fallbackErrorRate := float32(0)
 
 	primarySuccesses := f.primarySuccesses.Swap(0)
-	promaryFailures := f.primaryFailures.Swap(0)
-	if primarySuccesses+promaryFailures == 0 {
+	primaryFailures := f.primaryFailures.Swap(0)
+	if primarySuccesses+primaryFailures == 0 {
 		primaryErrorRate = 0
 	} else {
-		primaryErrorRate = float32(promaryFailures) / float32(promaryFailures+primarySuccesses)
+		primaryErrorRate = float32(primaryFailures) / float32(primaryFailures+primarySuccesses)
 	}
 
 	fallbackSuccesses := f.fallbackSuccesses.Swap(0)
@@ -311,24 +321,22 @@ func (f *GCPFallback) rateCheck() {
 		fallbackErrorRate = float32(fallbackFailures) / float32(fallbackFailures+fallbackSuccesses)
 	}
 
-	if f.enableFallback && primaryErrorRate >= f.errorRateThreshold && promaryFailures >= uint64(f.minFailedCalls) {
-		if f.isInFallback.CompareAndSwap(false, true) {
-			if f.fallbackCount != nil {
-				f.fallbackCount.Add(
-					context.Background(),
-					1,
-					metric.WithAttributes(
-						attribute.String("from_channel_name", f.primaryChannelName),
-						attribute.String("to_channel_name", f.fallbackChannelName),
-					),
-				)
-			}
+	if f.enableFallback && primaryErrorRate >= f.errorRateThreshold && primaryFailures >= uint64(f.minFailedCalls) {
+		if f.isInFallback.CompareAndSwap(false, true) && f.fallbackCounter != nil {
+			f.fallbackCounter.Add(
+				f.ctx,
+				1,
+				metric.WithAttributes(
+					attribute.String("from_channel_name", f.primaryChannelName),
+					attribute.String("to_channel_name", f.fallbackChannelName),
+				),
+			)
 		}
 	}
 
-	if f.errorRatio != nil {
-		f.errorRatio.Record(context.Background(), float64(primaryErrorRate), metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)))
-		f.errorRatio.Record(context.Background(), float64(fallbackErrorRate), metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)))
+	if f.errorRatioGauge != nil {
+		f.errorRatioGauge.Record(f.ctx, float64(primaryErrorRate), metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)))
+		f.errorRatioGauge.Record(f.ctx, float64(fallbackErrorRate), metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)))
 	}
 }
 
@@ -339,8 +347,8 @@ func (f *GCPFallback) probePrimary() {
 	} else if f.primaryDownSince.IsZero() {
 		f.primaryDownSince = time.Now()
 	}
-	if f.probeResult != nil {
-		f.probeResult.Add(context.Background(), 1, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName), attribute.String("result", result)))
+	if f.probeResultCounter != nil {
+		f.probeResultCounter.Add(f.ctx, 1, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName), attribute.String("result", result)))
 	}
 }
 
@@ -351,44 +359,49 @@ func (f *GCPFallback) probeFallback() {
 	} else if f.fallbackDownSince.IsZero() {
 		f.fallbackDownSince = time.Now()
 	}
-	if f.probeResult != nil {
-		f.probeResult.Add(context.Background(), 1, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName), attribute.String("result", result)))
+	if f.probeResultCounter != nil {
+		f.probeResultCounter.Add(f.ctx, 1, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName), attribute.String("result", result)))
 	}
 }
 
 // Close stops all the background goroutines and releases resources.
+// Another way to close GCPFallback is to cancel the provided context.
+// But both ways do not close the underlying connections.
+// The caller must close the primary and the fallback ClientConn on their own.
 func (f *GCPFallback) Close() {
-	if f.shutdown.Swap(true) {
-		return
-	}
-
-	f.rateCheckTicker.Stop()
-	close(f.rateCheckDone)
-
-	if f.primaryProbeTicker != nil {
-		f.primaryProbeTicker.Stop()
-		close(f.primaryProbeDone)
-	}
-
-	if f.fallbackProbeTicker != nil {
-		f.fallbackProbeTicker.Stop()
-		close(f.fallbackProbeDone)
-	}
+	f.cancel()
 }
 
 // Invoke performs a unary RPC and returns after the response is received
 // into reply.
 func (f *GCPFallback) Invoke(ctx context.Context, method string, args any, reply any, opts ...grpc.CallOption) error {
 	if f.isInFallback.Load() {
-		return connInvoke(ctx, f.fallbackConn, f.reportFallbackStatus, method, args, reply, opts...)
+		err := f.fallbackConn.Invoke(ctx, method, args, reply, opts...)
+		f.reportFallbackStatus(ctx, codeFromError(err))
+		return err
 	}
 
-	return connInvoke(ctx, f.primaryConn, f.reportPrimaryStatus, method, args, reply, opts...)
+	err := f.primaryConn.Invoke(ctx, method, args, reply, opts...)
+	f.reportPrimaryStatus(ctx, codeFromError(err))
+	return err
 }
 
 func (f *GCPFallback) isFailure(code codes.Code) bool {
 	_, found := f.erroneousCodes[code]
 	return found
+}
+
+func (f *GCPFallback) addToCallCounter(ctx context.Context, channelName, status string) {
+	if f.callCounter == nil {
+		return
+	}
+
+	f.callCounter.Add(ctx, 1, metric.WithAttributeSet(
+		attribute.NewSet(
+			attribute.String("channel_name", channelName),
+			attribute.String("status_code", status),
+		),
+	))
 }
 
 func (f *GCPFallback) reportPrimaryStatus(ctx context.Context, code codes.Code) {
@@ -398,12 +411,7 @@ func (f *GCPFallback) reportPrimaryStatus(ctx context.Context, code codes.Code) 
 		f.primarySuccesses.Add(1)
 	}
 
-	if f.callStatus != nil {
-		f.callStatus.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("channel_name", f.primaryChannelName),
-			attribute.String("status_code", code.String()),
-		))
-	}
+	f.addToCallCounter(ctx, f.primaryChannelName, code.String())
 }
 
 func (f *GCPFallback) reportFallbackStatus(ctx context.Context, code codes.Code) {
@@ -413,27 +421,20 @@ func (f *GCPFallback) reportFallbackStatus(ctx context.Context, code codes.Code)
 		f.fallbackSuccesses.Add(1)
 	}
 
-	if f.callStatus != nil {
-		f.callStatus.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("channel_name", f.fallbackChannelName),
-			attribute.String("status_code", code.String()),
-		))
-	}
+	f.addToCallCounter(ctx, f.fallbackChannelName, code.String())
 }
 
-func connInvoke(ctx context.Context, conn grpc.ClientConnInterface, report func(context.Context, codes.Code), method string, args any, reply any, opts ...grpc.CallOption) error {
-	err := conn.Invoke(ctx, method, args, reply, opts...)
-	code := codes.OK
-	if err != nil {
-		st, ok := status.FromError(err)
-		if ok {
-			code = st.Code()
-		} else {
-			code = codes.Unknown
-		}
+func codeFromError(err error) codes.Code {
+	return status.Convert(err).Code()
+}
+
+func streamingCodeFromError(err error) codes.Code {
+	// io.EOF is a successful stream close while streaming.
+	if err == io.EOF {
+		return codes.OK
 	}
-	report(ctx, code)
-	return err
+
+	return status.Convert(err).Code()
 }
 
 type monitoredStream struct {
@@ -444,22 +445,13 @@ type monitoredStream struct {
 }
 
 // RecvMsg blocks until a message is received or the stream is done.
-func (w *monitoredStream) RecvMsg(m any) error {
-	err := w.ClientStream.RecvMsg(m)
+func (ms *monitoredStream) RecvMsg(m any) error {
+	err := ms.ClientStream.RecvMsg(m)
 	if err == nil {
 		return err
 	}
 
-	code := codes.OK
-	if err != io.EOF {
-		st, ok := status.FromError(err)
-		if ok {
-			code = st.Code()
-		} else {
-			code = codes.Unknown
-		}
-	}
-	w.reportRPCResult(w.ctx, code)
+	ms.reportRPCResult(ms.ctx, streamingCodeFromError(err))
 	return err
 }
 
@@ -476,7 +468,7 @@ func (f *GCPFallback) NewStream(ctx context.Context, desc *grpc.StreamDesc, meth
 	if f.isInFallback.Load() {
 		s, err := f.fallbackConn.NewStream(ctx, desc, method, opts...)
 		if err != nil {
-			// TODO: maybe handle stream creation errors.
+			f.reportFallbackStatus(ctx, codeFromError(err))
 			return s, err
 		}
 		return newMonitoredStream(ctx, s, f.reportFallbackStatus), nil
@@ -484,7 +476,7 @@ func (f *GCPFallback) NewStream(ctx context.Context, desc *grpc.StreamDesc, meth
 
 	s, err := f.primaryConn.NewStream(ctx, desc, method, opts...)
 	if err != nil {
-		// TODO: maybe handle stream creation errors.
+		f.reportPrimaryStatus(ctx, codeFromError(err))
 		return s, err
 	}
 	return newMonitoredStream(ctx, s, f.reportPrimaryStatus), nil

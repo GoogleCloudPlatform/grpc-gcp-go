@@ -52,7 +52,7 @@ func setup(t *testing.T, opts *GCPFallbackOptions) (*mockCtrl, *GCPFallback, *mo
 		opts.MinFailedCalls = 3
 	}
 
-	gcpFallback, err := NewGCPFallback(primaryConn, fallbackConn, opts)
+	gcpFallback, err := NewGCPFallback(context.Background(), primaryConn, fallbackConn, opts)
 	if err != nil {
 		t.Fatalf("NewGCPFallback() error = %v", err)
 	}
