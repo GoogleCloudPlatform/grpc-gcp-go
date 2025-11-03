@@ -83,6 +83,7 @@ type GCPFallbackOptions struct {
 	// EnableFallback controls whether the fallback mechanism is enabled.
 	EnableFallback bool
 	// ErrorRateThreshold is the threshold for the error rate of the primary connection.
+	// 1.0 means 100% error rate.
 	ErrorRateThreshold float32
 	// ErroneousCodes is a list of error codes that are considered erroneous.
 	ErroneousCodes []codes.Code
@@ -92,6 +93,8 @@ type GCPFallbackOptions struct {
 	MinFailedCalls int
 
 	// PrimaryProbingFn is the probing function for the primary connection.
+	// The fallback decision is not made based only on the error rate of the
+	// probing RPCs, but all RPCs.
 	PrimaryProbingFn GCPFallbackProbeFn
 	// FallbackProbingFn is the probing function for the fallback connection.
 	FallbackProbingFn GCPFallbackProbeFn
