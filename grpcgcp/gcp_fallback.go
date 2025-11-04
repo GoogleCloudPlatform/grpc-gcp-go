@@ -56,8 +56,8 @@ type GCPFallback struct {
 	fallbackProbingFn   GCPFallbackProbeFn
 	primaryChannelName  string
 	fallbackChannelName string
-	primaryDownSince    time.Time
-	fallbackDownSince   time.Time
+	primaryDownSince    atomic.Pointer[time.Time]
+	fallbackDownSince   atomic.Pointer[time.Time]
 
 	// OpenTelemetry metrics.
 	meter                metric.Meter
@@ -275,25 +275,27 @@ func (f *GCPFallback) initMetrics() error {
 		metric.WithDescription("How many consecutive seconds probing fails for the channel."),
 		metric.WithUnit("s"),
 		metric.WithFloat64Callback(func(ctx context.Context, io metric.Float64Observer) error {
-			if f.primaryDownSince.IsZero() {
+			primaryDownSince := f.primaryDownSince.Load()
+			fallbackDownSince := f.fallbackDownSince.Load()
+			if primaryDownSince == nil {
 				io.Observe(
 					0,
 					metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)),
 				)
 			} else {
 				io.Observe(
-					time.Since(f.primaryDownSince).Seconds(),
+					time.Since(*primaryDownSince).Seconds(),
 					metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName)),
 				)
 			}
-			if f.fallbackDownSince.IsZero() {
+			if fallbackDownSince == nil {
 				io.Observe(
 					0,
 					metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)),
 				)
 			} else {
 				io.Observe(
-					time.Since(f.fallbackDownSince).Seconds(),
+					time.Since(*fallbackDownSince).Seconds(),
 					metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName)),
 				)
 			}
@@ -350,9 +352,10 @@ func (f *GCPFallback) probePrimary() {
 
 	result := f.primaryProbingFn(f.primaryConn)
 	if result == "" {
-		f.primaryDownSince = time.Time{}
-	} else if f.primaryDownSince.IsZero() {
-		f.primaryDownSince = time.Now()
+		f.primaryDownSince.Store(nil)
+	} else {
+		now := time.Now()
+		f.primaryDownSince.CompareAndSwap(nil, &now)
 	}
 	if f.probeResultCounter != nil {
 		f.probeResultCounter.Add(f.ctx, 1, metric.WithAttributes(attribute.String("channel_name", f.primaryChannelName), attribute.String("result", result)))
@@ -362,9 +365,10 @@ func (f *GCPFallback) probePrimary() {
 func (f *GCPFallback) probeFallback() {
 	result := f.fallbackProbingFn(f.fallbackConn)
 	if result == "" {
-		f.fallbackDownSince = time.Time{}
-	} else if f.fallbackDownSince.IsZero() {
-		f.fallbackDownSince = time.Now()
+		f.fallbackDownSince.Store(nil)
+	} else {
+		now := time.Now()
+		f.fallbackDownSince.CompareAndSwap(nil, &now)
 	}
 	if f.probeResultCounter != nil {
 		f.probeResultCounter.Add(f.ctx, 1, metric.WithAttributes(attribute.String("channel_name", f.fallbackChannelName), attribute.String("result", result)))

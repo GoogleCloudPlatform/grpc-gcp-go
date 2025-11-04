@@ -21,6 +21,7 @@ package grpcgcp
 import (
 	"context"
 	"io"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -414,19 +415,15 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 
 		primaryResults := []string{"Unavailable", "Unavailable", ""}
 		fallbackResults := []string{"Internal", "Unavailable", "", ""}
-		primaryIndex := 0
-		fallbackIndex := 0
+		primaryIndex := atomic.Int32{}
+		fallbackIndex := atomic.Int32{}
 
 		opts := NewGCPFallbackOptions()
 		opts.PrimaryProbingFn = func(cci grpc.ClientConnInterface) string {
-			res := primaryResults[primaryIndex]
-			primaryIndex++
-			return res
+			return primaryResults[primaryIndex.Add(1)-1]
 		}
 		opts.FallbackProbingFn = func(cci grpc.ClientConnInterface) string {
-			res := fallbackResults[fallbackIndex]
-			fallbackIndex++
-			return res
+			return fallbackResults[fallbackIndex.Add(1)-1]
 		}
 		opts.Period = 5 * time.Second
 		opts.PrimaryProbingInterval = 10 * time.Second
@@ -466,7 +463,7 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 		// This probing should happen only for the fallback channel as we don't probe primary until fallback happens.
 		time.Sleep(14 * time.Second)
 		synctest.Wait()
-		if primaryIndex != 0 {
+		if primaryIndex.Load() != 0 {
 			t.Fatalf("Primary probe count before fallback must be 0, got: %d", primaryIndex)
 		}
 
@@ -502,10 +499,10 @@ func TestGCPFallback_ProbeMetrics(t *testing.T) {
 		// Wait for the second probing. This time both primary and fallback should be probed.
 		time.Sleep(10 * time.Second)
 		synctest.Wait()
-		if primaryIndex != 1 {
+		if primaryIndex.Load() != 1 {
 			t.Fatalf("Primary probe count after fallback must be 1, got: %d", primaryIndex)
 		}
-		if fallbackIndex != 2 {
+		if fallbackIndex.Load() != 2 {
 			t.Fatalf("Fallback probe count after fallback must be 2, got: %d", fallbackIndex)
 		}
 
