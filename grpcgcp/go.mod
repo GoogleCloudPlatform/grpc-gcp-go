@@ -2,7 +2,7 @@ module github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp
 
 go 1.23.0
 
-toolchain go1.24.8
+toolchain go1.25.3
 
 require (
 	github.com/golang/mock v1.6.0
